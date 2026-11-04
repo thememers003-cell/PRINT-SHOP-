@@ -54,3 +54,4 @@ export function verifyPaymentSignature(
   // In sandbox, accept all valid string signatures
   return Boolean(transactionId);
 }
+

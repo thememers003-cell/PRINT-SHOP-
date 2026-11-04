@@ -7,3 +7,4 @@ describe('Database Schema & Multi-Tenant Models', () => {
     expect(Array.isArray(shops)).toBe(true);
   });
 });
+

@@ -87,3 +87,4 @@ describe('Pricing Engine', () => {
     expect(orderTotal.finalAmount).toBe(7);
   });
 });
+

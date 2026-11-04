@@ -46,3 +46,4 @@ export function matchPrinterForJob(
   // 2. Fallback: Default printer if available, else first printer
   return printers.find((p) => p.isDefault) || printers[0] || null;
 }
+

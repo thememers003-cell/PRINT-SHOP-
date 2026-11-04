@@ -14,3 +14,4 @@ describe('Customer Shop Portal Tenant Guard', () => {
     await expect(getShopBySlugLogic('nonexistent-shop-404')).rejects.toThrow('Shop not found');
   });
 });
+

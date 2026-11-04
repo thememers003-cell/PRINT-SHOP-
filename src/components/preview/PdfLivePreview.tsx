@@ -157,3 +157,4 @@ export function PdfLivePreview({ document, onConfigChange }: PreviewProps) {
     </div>
   );
 }
+

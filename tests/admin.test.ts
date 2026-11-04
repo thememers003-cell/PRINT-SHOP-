@@ -38,3 +38,4 @@ describe('Super Admin Operations', () => {
     expect(typeof metrics.totalPlatformRevenue).toBe('number');
   });
 });
+

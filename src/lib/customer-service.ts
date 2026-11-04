@@ -24,3 +24,4 @@ export async function getShopBySlugLogic(slug: string) {
 
   return { shop };
 }
+

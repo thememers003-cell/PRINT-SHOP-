@@ -5,3 +5,4 @@ export function generateJobId(sequenceNum: number, year = new Date().getFullYear
   const padded = String(sequenceNum).padStart(6, '0');
   return `PB-${year}-${padded}`;
 }
+

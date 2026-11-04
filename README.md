@@ -136,3 +136,4 @@ npm test
 - `tests/auto-print.test.ts`: Smart capability-based printer matching
 - `tests/settlements.test.ts`: Commission withholding, payout computation, and CSV export
 - `tests/e2e-workflow.test.ts`: Complete end-to-end customer-to-printer lifecycle
+

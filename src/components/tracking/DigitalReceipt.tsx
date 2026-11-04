@@ -75,3 +75,4 @@ export function DigitalReceipt({ order }: ReceiptProps) {
     </div>
   );
 }
+

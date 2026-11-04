@@ -55,3 +55,4 @@ describe('Smart Printer Matcher & Auto-Print Pipeline', () => {
     expect(matched?.id).toBe('p1'); // Falls back to default
   });
 });
+

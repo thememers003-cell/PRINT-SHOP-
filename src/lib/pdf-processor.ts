@@ -153,3 +153,4 @@ export async function generatePrintReadyPdf(
   const resultBytes = await destDoc.save();
   return Buffer.from(resultBytes);
 }
+

@@ -25,3 +25,4 @@ describe('Shop Owner POS Dashboard Service', () => {
     expect(result.order.status).toBe('QUEUED');
   });
 });
+

@@ -206,3 +206,4 @@ export async function updateAgentHeartbeatLogic(apiKey: string) {
 
   return { success: true, timestamp: new Date().toISOString() };
 }
+
