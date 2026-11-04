@@ -1,0 +1,192 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      String   @default("SHOP_OWNER") // SUPER_ADMIN, SHOP_OWNER
+  shopId    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  shop      Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model Shop {
+  id             String        @id @default(cuid())
+  slug           String        @unique
+  name           String
+  ownerName      String
+  email          String
+  mobile         String
+  address        String
+  city           String
+  state          String
+  pinCode        String
+  gstNumber      String?
+  logoUrl        String?
+  status         String        @default("ACTIVE") // ACTIVE, INACTIVE, SUSPENDED
+  printMode      String        @default("MANUAL") // MANUAL, AUTO
+  commissionRate Float         @default(5.0) // percentage or fixed
+  commissionType String        @default("PERCENT") // PERCENT or FLAT
+  apiKey         String        @unique @default(cuid())
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  users          User[]
+  pricing        ShopPricing?
+  printers       ShopPrinter[]
+  orders         Order[]
+  settlements    Settlement[]
+  documents      Document[]
+}
+
+model ShopPricing {
+  id               String   @id @default(cuid())
+  shopId           String   @unique
+  bwSingle         Float    @default(2.0)
+  bwDuplex         Float    @default(1.5) // per printed side (₹3/sheet)
+  colorSingle      Float    @default(10.0)
+  colorDuplex      Float    @default(9.0) // per printed side (₹18/sheet)
+  a3Multiplier     Float    @default(2.0)
+  a5Multiplier     Float    @default(0.8)
+  letterMultiplier Float    @default(1.0)
+  legalMultiplier  Float    @default(1.2)
+  minOrderAmount   Float    @default(5.0)
+  serviceFee       Float    @default(0.0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  shop             Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model ShopPrinter {
+  id                String    @id @default(cuid())
+  shopId            String
+  name              String
+  systemDriver      String?
+  portName          String?
+  status            String    @default("ONLINE") // ONLINE, OFFLINE, ERROR
+  isDefault         Boolean   @default(false)
+  supportsColor     Boolean   @default(false)
+  supportsDuplex    Boolean   @default(true)
+  paperSizes        String    @default("A4,Letter") // Comma-separated or JSON string
+  activeQueueLength Int       @default(0)
+  lastHeartbeat     DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  shop              Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  jobs              PrintJob[]
+}
+
+model Order {
+  id                 String      @id @default(cuid())
+  jobId              String      @unique // e.g. PB-2026-000001
+  shopId             String
+  customerName       String?
+  customerPhone      String?
+  status             String      @default("UPLOADED") // UPLOADED, CONFIGURED, PAYMENT_PENDING, PAID, QUEUED, PRINTING, COMPLETED, FAILED, CANCELLED, REFUNDED
+  totalAmount        Float       @default(0.0)
+  platformCommission Float       @default(0.0)
+  shopEarnings       Float       @default(0.0)
+  paymentStatus      String      @default("INITIATED") // INITIATED, SUCCESS, FAILED
+  trackingToken      String      @unique @default(cuid())
+  notes              String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  shop               Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  jobs               PrintJob[]
+  payment            Payment?
+  documents          Document[]
+}
+
+model Document {
+  id               String      @id @default(cuid())
+  shopId           String
+  orderId          String?
+  fileKey          String
+  originalFilename String
+  mimeType         String
+  pageCount        Int         @default(1)
+  fileSize         Int         @default(0)
+  storageUrl       String
+  createdAt        DateTime    @default(now())
+
+  shop             Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  order            Order?      @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  printJobs        PrintJob[]
+}
+
+model PrintJob {
+  id             String       @id @default(cuid())
+  orderId        String
+  documentId     String
+  printerId      String?
+  copies         Int          @default(1)
+  colorMode      String       @default("BW") // BW, COLOR
+  sides          String       @default("SINGLE") // SINGLE, DUPLEX
+  orientation    String       @default("PORTRAIT") // PORTRAIT, LANDSCAPE, AUTO
+  paperSize      String       @default("A4") // A4, A3, A5, LETTER, LEGAL
+  pageRange      String       @default("all")
+  nUp            Int          @default(1) // 1, 2, 4, 6, 9
+  printStatus    String       @default("PENDING") // PENDING, QUEUED, PRINTING, COMPLETED, FAILED
+  printReadyUrl  String?
+  errorMessage   String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  order          Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  document       Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  printer        ShopPrinter? @relation(fields: [printerId], references: [id], onDelete: SetNull)
+}
+
+model Payment {
+  id            String    @id @default(cuid())
+  orderId       String    @unique
+  transactionId String?
+  gateway       String    @default("MOCK") // PHONEPE, RAZORPAY, MOCK
+  amount        Float
+  currency      String    @default("INR")
+  status        String    @default("INITIATED") // INITIATED, SUCCESS, FAILED
+  signature     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Settlement {
+  id                 String    @id @default(cuid())
+  shopId             String
+  periodStart        DateTime
+  periodEnd          DateTime
+  totalOrders        Int       @default(0)
+  totalGross         Float     @default(0.0)
+  platformCommission Float     @default(0.0)
+  shopPayout         Float     @default(0.0)
+  status             String    @default("PENDING") // PENDING, SETTLED
+  transactionRef     String?
+  settledAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  shop               Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  shopId    String?
+  userId    String?
+  action    String
+  metadata  String?  // JSON string
+  createdAt DateTime @default(now())
+}
