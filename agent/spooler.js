@@ -1,77 +1,89 @@
-const { exec } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+const ptp = require('pdf-to-printer');
 
 /**
- * Auto-detects all installed physical and virtual printers on this Windows machine using PowerShell.
+ * Auto-detects all installed physical and virtual printers on this Windows machine using pdf-to-printer.
  */
-function discoverWindowsPrinters() {
-  return new Promise((resolve) => {
-    const cmd = `powershell -NoProfile -Command "Get-Printer | Select-Object Name, DriverName, PortName, PrinterStatus | ConvertTo-Json"`;
-    exec(cmd, { timeout: 10000 }, (error, stdout) => {
-      if (error || !stdout.trim()) {
-        console.warn('⚠️ Could not query Windows printers directly, returning standard default printers.');
-        return resolve([
-          {
-            name: 'Microsoft Print to PDF',
-            systemDriver: 'Microsoft Print To PDF',
-            portName: 'PORTPROMPT:',
-            supportsColor: true,
-            supportsDuplex: false,
-            paperSizes: 'A4,Letter',
-          },
-        ]);
-      }
-
-      try {
-        const parsed = JSON.parse(stdout);
-        const list = Array.isArray(parsed) ? parsed : [parsed];
-        const printers = list.map((p) => ({
-          name: p.Name,
-          systemDriver: p.DriverName,
-          portName: p.PortName,
-          supportsColor: !p.Name.toLowerCase().includes('monochrome') && !p.Name.toLowerCase().includes('b&w'),
-          supportsDuplex: true,
-          paperSizes: 'A4,A3,Letter,Legal',
-        }));
-        resolve(printers);
-      } catch (err) {
-        resolve([]);
-      }
-    });
-  });
+async function discoverWindowsPrinters() {
+  try {
+    const list = await ptp.getPrinters();
+    return list.map((p) => ({
+      name: p.name,
+      systemDriver: p.deviceId || p.name,
+      portName: 'USB001',
+      supportsColor: !p.name.toLowerCase().includes('monochrome') && !p.name.toLowerCase().includes('b&w'),
+      supportsDuplex: true,
+      paperSizes: p.paperSizes ? p.paperSizes.join(',') : 'A4,Letter',
+    }));
+  } catch (error) {
+    console.warn('⚠️ ptp.getPrinters error, falling back:', error.message);
+    return [
+      {
+        name: 'Microsoft Print to PDF',
+        systemDriver: 'Microsoft Print To PDF',
+        portName: 'PORTPROMPT:',
+        supportsColor: true,
+        supportsDuplex: false,
+        paperSizes: 'A4,Letter',
+      },
+    ];
+  }
 }
 
 /**
- * Spools a document to a designated Windows printer.
+ * Spools a document to an actual Windows printer via pdf-to-printer.
  */
-function spoolDocument(filePath, printerName, options = {}) {
-  return new Promise((resolve, reject) => {
-    console.log(`🖨️ Spooling '${filePath}' to Windows printer: '${printerName}' (copies: ${options.copies || 1})...`);
+async function spoolDocument(filePath, targetPrinterName, options = {}) {
+  console.log(`🖨️ Preparing to spool '${filePath}'...`);
 
-    // In a live Windows counter environment with pdf-to-printer installed:
-    // const ptp = require('pdf-to-printer');
-    // ptp.print(filePath, { printer: printerName, copies: options.copies || 1 }).then(resolve).catch(reject);
+  // Query installed Windows printers
+  let installedPrinters = [];
+  try {
+    installedPrinters = await ptp.getPrinters();
+  } catch (e) {
+    console.error('Could not get printers list:', e.message);
+  }
 
-    // Using native PowerShell spooler command for universal Windows compatibility:
-    const escapedFile = filePath.replace(/'/g, "''");
-    const escapedPrinter = (printerName || 'Default').replace(/'/g, "''");
-    
-    // Command simulates or submits to Windows spooler
-    const cmd = `powershell -NoProfile -Command "Write-Output 'Spooling ${escapedFile} to ${escapedPrinter}'"`;
+  const installedNames = installedPrinters.map((p) => p.name);
+  console.log(`📋 Available Windows printers on this PC:`, installedNames.join(', '));
 
-    exec(cmd, (error, stdout) => {
-      if (error) {
-        return reject(new Error(`Windows Print Spooler error: ${error.message}`));
-      }
-      console.log(`✅ Spooler confirmed document successfully queued for printing.`);
-      resolve({ success: true, spoolMessage: stdout.trim() });
-    });
-  });
+  let chosenPrinter = targetPrinterName;
+
+  // Check if requested printer exists
+  if (!installedNames.includes(chosenPrinter)) {
+    // Prioritize active EPSON printer, then Canon/HP/MF280, then default
+    const physical = 
+      installedNames.find((name) => name.toLowerCase().includes('epson')) ||
+      installedNames.find((name) => name.toLowerCase().includes('canon')) ||
+      installedNames.find((name) => name.toLowerCase().includes('hp')) ||
+      installedNames.find((name) => name.toLowerCase().includes('mf280'));
+
+    let defaultP = null;
+    try {
+      defaultP = await ptp.getDefaultPrinter();
+    } catch (e) {}
+
+    chosenPrinter = physical || (defaultP ? defaultP.name : installedNames[0]);
+    console.log(`ℹ️ Target '${targetPrinterName}' not found on this PC. Routing to real printer: '${chosenPrinter}'`);
+  }
+
+  console.log(`🚀 SENDING PRINT COMMAND TO WINDOWS SPOOLER: Printer '${chosenPrinter}' (copies: ${options.copies || 1})...`);
+
+  const printOptions = {
+    printer: chosenPrinter,
+  };
+
+  if (options.copies && options.copies > 1) {
+    printOptions.copies = options.copies;
+  }
+
+  // Direct call to Windows Spooler via SumatraPDF / pdf-to-printer
+  await ptp.print(filePath, printOptions);
+
+  console.log(`🎉 SUCCESS: Document spooled to '${chosenPrinter}'! Check your printer queue.`);
+  return { success: true, printer: chosenPrinter };
 }
 
 module.exports = {
   discoverWindowsPrinters,
   spoolDocument,
 };
-

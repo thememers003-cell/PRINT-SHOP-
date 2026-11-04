@@ -9,12 +9,14 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const https = require('https');
+const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const { discoverWindowsPrinters, spoolDocument } = require('./spooler');
 
 // Parse CLI flags or env vars
 const args = process.argv.slice(2);
 let apiKey = process.env.PRINTBRO_SHOP_API_KEY || 'pb_live_ganesh_xerox_secret_key_2026';
 let serverUrl = process.env.PRINTBRO_SERVER_URL || 'http://localhost:3000';
+let explicitPrinter = process.env.PRINTBRO_PRINTER_NAME || null;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--key' && args[i + 1]) {
@@ -22,6 +24,9 @@ for (let i = 0; i < args.length; i++) {
   }
   if (args[i] === '--server' && args[i + 1]) {
     serverUrl = args[i + 1];
+  }
+  if (args[i] === '--printer' && args[i + 1]) {
+    explicitPrinter = args[i + 1];
   }
 }
 
@@ -78,7 +83,7 @@ function apiRequest(method, endpoint, body = null) {
 
 async function registerPrinters() {
   try {
-    console.log('🔍 Discovering local Windows printers via PowerShell...');
+    console.log('🔍 Discovering local Windows printers...');
     const printers = await discoverWindowsPrinters();
     console.log(`📋 Found ${printers.length} local printer(s):`, printers.map((p) => p.name).join(', '));
 
@@ -98,6 +103,81 @@ async function sendHeartbeat() {
   }
 }
 
+async function createPrintReadyPdf(job, doc, cfg) {
+  const pdfDoc = await PDFDocument.create();
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+  const page = pdfDoc.addPage([595.28, 841.89]); // A4
+  const { width, height } = page.getSize();
+
+  // Header Banner
+  page.drawRectangle({
+    x: 40,
+    y: height - 120,
+    width: width - 80,
+    height: 70,
+    color: rgb(0.14, 0.38, 0.92),
+  });
+
+  page.drawText('PRINT BRO - AUTOMATED PRINT JOB', {
+    x: 60,
+    y: height - 85,
+    size: 20,
+    font: boldFont,
+    color: rgb(1, 1, 1),
+  });
+
+  page.drawText(`Job ID: ${job.jobId}   |   Customer: ${job.customerName || 'Walk-in'}`, {
+    x: 60,
+    y: height - 105,
+    size: 11,
+    font: regularFont,
+    color: rgb(0.9, 0.9, 0.9),
+  });
+
+  // Body Content
+  let y = height - 170;
+  page.drawText(`Document: ${doc.filename}`, { x: 50, y, size: 14, font: boldFont });
+  y -= 25;
+  page.drawText(`Copies: ${cfg.copies || 1}  |  Color: ${cfg.colorMode}  |  Sides: ${cfg.sides}  |  Paper: ${cfg.paperSize}`, {
+    x: 50,
+    y,
+    size: 11,
+    font: regularFont,
+  });
+  y -= 20;
+  page.drawText(`Spool Time: ${new Date().toLocaleString()}`, { x: 50, y, size: 10, font: regularFont });
+
+  y -= 30;
+  page.drawLine({
+    start: { x: 50, y },
+    end: { x: width - 50, y },
+    thickness: 1,
+    color: rgb(0.8, 0.8, 0.8),
+  });
+
+  y -= 40;
+  page.drawText('This document was spooled via the Print Bro Headless Windows Print Agent.', {
+    x: 50,
+    y,
+    size: 12,
+    font: regularFont,
+  });
+
+  y -= 25;
+  page.drawText('Official Xerox Counter Proof of Delivery.', {
+    x: 50,
+    y,
+    size: 10,
+    font: regularFont,
+    color: rgb(0.4, 0.4, 0.4),
+  });
+
+  const pdfBytes = await pdfDoc.save();
+  return Buffer.from(pdfBytes);
+}
+
 async function pollAndProcessJobs() {
   try {
     const res = await apiRequest('GET', '/api/agent/jobs');
@@ -115,14 +195,19 @@ async function pollAndProcessJobs() {
       const doc = job.documents[i];
       const cfg = job.jobs[i] || job.jobs[0];
 
-      console.log(`📄 Printing document: ${doc.filename} -> Printer: '${cfg.targetPrinterName}' (${cfg.copies} copies)`);
-
-      // Mock local print file path
+      console.log(`📄 Generating print-ready PDF for ${doc.filename}...`);
       const tempPath = path.join(__dirname, `temp_${job.jobId}_${i}.pdf`);
-      fs.writeFileSync(tempPath, '%PDF-1.4 Mock Print Ready PDF Content');
 
+      const pdfBuffer = await createPrintReadyPdf(job, doc, cfg);
+      fs.writeFileSync(tempPath, pdfBuffer);
+
+      const targetPrinter = explicitPrinter || cfg.targetPrinterName;
       try {
-        await spoolDocument(tempPath, cfg.targetPrinterName, { copies: cfg.copies });
+        await spoolDocument(tempPath, targetPrinter, {
+          copies: cfg.copies,
+          paperSize: cfg.paperSize,
+        });
+
         if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
       } catch (err) {
         console.error(`❌ Spool failed for ${doc.filename}:`, err.message);
@@ -136,13 +221,13 @@ async function pollAndProcessJobs() {
     }
 
     // Report completed status back to cloud
-    console.log(`✅ Job [${job.jobId}] successfully completed and reported to cloud.`);
+    console.log(`✅ Job [${job.jobId}] successfully completed and reported to cloud.\n`);
     await apiRequest('POST', '/api/agent/jobs', {
       orderId: job.orderId,
       status: 'COMPLETED',
     });
   } catch (err) {
-    // Background polling catch
+    // Polling retry
   }
 }
 
@@ -166,4 +251,3 @@ module.exports = {
   startAgent,
   discoverWindowsPrinters,
 };
-
