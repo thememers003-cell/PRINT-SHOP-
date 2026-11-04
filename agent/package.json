@@ -1,0 +1,12 @@
+{
+  "name": "print-bro-agent",
+  "version": "1.0.0",
+  "description": "Print Bro Headless Windows Local Print Agent",
+  "main": "agent.js",
+  "scripts": {
+    "start": "node agent.js"
+  },
+  "dependencies": {
+    "pdf-to-printer": "^5.6.0"
+  }
+}
