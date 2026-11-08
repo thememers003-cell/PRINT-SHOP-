@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { Download, Printer, CheckCircle } from 'lucide-react';
+import { Download, Printer, CheckCircle, ExternalLink, FileText } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 interface ReceiptProps {
   order: any;
@@ -12,20 +13,41 @@ export function DigitalReceipt({ order }: ReceiptProps) {
     window.print();
   };
 
+  const isCompleted = order.status === 'COMPLETED';
+
   return (
-    <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8 space-y-6">
+    <motion.div 
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+      className="glass-card rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm"
+    >
       <div className="flex items-center justify-between border-b border-slate-100 pb-4">
         <div>
-          <h3 className="text-base font-bold text-slate-900">Digital Tax Receipt</h3>
-          <p className="text-xs text-slate-500">Official Xerox Proof of Payment</p>
+          <h3 className="text-base font-black text-slate-900">Digital Tax Receipt</h3>
+          <p className="text-xs text-slate-500 font-medium">Official Proof of Payment &amp; Print Specs</p>
         </div>
-        <button
-          onClick={handlePrintReceipt}
-          className="px-3.5 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 transition flex items-center space-x-1.5"
-        >
-          <Printer className="w-3.5 h-3.5" />
-          <span>Print Receipt</span>
-        </button>
+        <div className="flex items-center space-x-2">
+          {isCompleted && (
+            <a
+              href={`/spooler-output/order_${order.jobId}.pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold transition flex items-center space-x-1.5 border border-blue-200/80 cursor-pointer shadow-2xs"
+              title="Open exact print-ready spooled PDF in new tab"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>View Printout</span>
+            </a>
+          )}
+          <button
+            onClick={handlePrintReceipt}
+            className="px-3.5 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 transition flex items-center space-x-1.5 cursor-pointer shadow-2xs"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            <span>Print Receipt</span>
+          </button>
+        </div>
       </div>
 
       <div className="bg-slate-50 rounded-2xl p-4 sm:p-6 font-mono text-xs text-slate-700 space-y-3 border border-slate-200/60">
@@ -47,9 +69,9 @@ export function DigitalReceipt({ order }: ReceiptProps) {
             return (
               <div key={doc.id} className="flex items-center justify-between">
                 <div>
-                  <span className="font-semibold">{doc.name}</span>
+                  <span className="font-semibold text-slate-900">{doc.name}</span>
                   <span className="text-[10px] text-slate-500 block">
-                    {doc.pages} pages • {job?.colorMode} • {job?.sides} • {job?.copies}x
+                    {doc.pages || 1} pages • {job?.colorMode} • {job?.sides} • {job?.copies || 1}x copy
                   </span>
                 </div>
               </div>
@@ -68,11 +90,10 @@ export function DigitalReceipt({ order }: ReceiptProps) {
           </div>
           <div className="flex items-center justify-between font-bold text-sm text-slate-900 pt-1">
             <span>Total Paid</span>
-            <span>₹{order.totalAmount?.toFixed(2)}</span>
+            <span className="text-blue-600 font-black text-base">₹{order.totalAmount?.toFixed(2)}</span>
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
-

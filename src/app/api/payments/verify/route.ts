@@ -85,6 +85,15 @@ export async function POST(request: Request) {
       timestamp: new Date().toISOString(),
     });
 
+    // In AUTO mode: immediately trigger 100% silent hardware spooling with zero human intervention!
+    if (isAutoPrint) {
+      import('@/lib/spooler-service').then(({ spoolOrderDirectly }) => {
+        spoolOrderDirectly(order.id).catch((spoolErr) => {
+          console.warn('Auto silent spool fallback notice:', spoolErr.message);
+        });
+      });
+    }
+
     return NextResponse.json({ success: true, order: updatedOrder });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

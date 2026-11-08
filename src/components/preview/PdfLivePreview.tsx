@@ -14,13 +14,23 @@ import {
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
+import { PdfPageCanvas } from './PdfPageCanvas';
 
 interface PreviewProps {
   document: UploadedDoc | null;
   onConfigChange: (updatedConfig: UploadedDoc['config']) => void;
+  allDocuments?: UploadedDoc[];
+  isCombinedMultiUp?: boolean;
+  isMergedDocument?: boolean;
 }
 
-export function PdfLivePreview({ document, onConfigChange }: PreviewProps) {
+export function PdfLivePreview({
+  document,
+  onConfigChange,
+  allDocuments = [],
+  isCombinedMultiUp = false,
+  isMergedDocument = false,
+}: PreviewProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [activeSide, setActiveSide] = useState<'FRONT' | 'BACK'>('FRONT');
 
@@ -39,22 +49,58 @@ export function PdfLivePreview({ document, onConfigChange }: PreviewProps) {
   const isGrayscale = config.colorMode === 'BW';
   const isDuplex = config.sides === 'DUPLEX';
   const nUp = config.nUp || 1;
+  const totalSheets = Math.ceil(pageCount / nUp);
+  const isSheetLandscape = isLandscape || nUp === 2 || nUp === 6;
+  const isMerged = isMergedDocument && !isCombinedMultiUp && allDocuments.length > 1;
+  const totalCombinedPages = allDocuments.reduce((sum, d) => sum + (d.pageCount || 1), 0);
+
+  const isImage =
+    document.type.startsWith('image/') ||
+    document.name.toLowerCase().endsWith('.png') ||
+    document.name.toLowerCase().endsWith('.jpg') ||
+    document.name.toLowerCase().endsWith('.jpeg');
+
+  // Page range calculations for current sheet
+  const startPageNum = (currentPage - 1) * nUp + 1;
+  const endPageNum = Math.min(currentPage * nUp, pageCount);
 
   // Grid styling for N-up preview
   let gridColsClass = 'grid-cols-1';
-  if (nUp === 2) gridColsClass = 'grid-cols-2';
-  if (nUp === 4) gridColsClass = 'grid-cols-2';
-  if (nUp === 6) gridColsClass = 'grid-cols-3';
-  if (nUp === 9) gridColsClass = 'grid-cols-3';
+  let cellFitWidth = 320;
+  if (nUp === 2) {
+    gridColsClass = 'grid-cols-2';
+    cellFitWidth = 190;
+  } else if (nUp === 4) {
+    gridColsClass = 'grid-cols-2';
+    cellFitWidth = 170;
+  } else if (nUp === 6) {
+    gridColsClass = 'grid-cols-3';
+    cellFitWidth = 120;
+  } else if (nUp === 9) {
+    gridColsClass = 'grid-cols-3';
+    cellFitWidth = 90;
+  }
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
       {/* Top Preview Controls Toolbar */}
       <div className="p-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between text-xs text-slate-600">
         <div className="flex items-center space-x-2">
-          <span className="font-semibold text-slate-800 truncate max-w-[150px] sm:max-w-xs">{document.name}</span>
-          <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
-            Page {currentPage} of {pageCount}
+          <span className="font-semibold text-slate-800 truncate max-w-[150px] sm:max-w-xs">
+            {isCombinedMultiUp && allDocuments.length > 1
+              ? `Combined (${allDocuments.length} Photos)`
+              : isMerged
+              ? `Merged (${allDocuments.length} Files)`
+              : document.name}
+          </span>
+          <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+            {isCombinedMultiUp && allDocuments.length > 1
+              ? `1 Sheet • ${allDocuments.length} photos in ${nUp}-up grid`
+              : isMerged
+              ? `${totalCombinedPages} Total Pages • Auto-Merged Document`
+              : nUp > 1
+              ? `Sheet ${currentPage} of ${totalSheets} (Pages ${startPageNum}–${endPageNum})`
+              : `Page ${currentPage} of ${pageCount}`}
           </span>
         </div>
 
@@ -65,13 +111,13 @@ export function PdfLivePreview({ document, onConfigChange }: PreviewProps) {
               onClick={() => setActiveSide('FRONT')}
               className={`px-2 py-1 rounded-md transition ${activeSide === 'FRONT' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
             >
-              Sheet Front
+              Front Side
             </button>
             <button
               onClick={() => setActiveSide('BACK')}
               className={`px-2 py-1 rounded-md transition ${activeSide === 'BACK' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
             >
-              Sheet Back
+              Back Side
             </button>
           </div>
         )}
@@ -81,48 +127,104 @@ export function PdfLivePreview({ document, onConfigChange }: PreviewProps) {
       <div className="p-6 sm:p-10 bg-slate-100 flex items-center justify-center min-h-[380px] overflow-hidden relative">
         {/* Physical Paper Sheet Mockup */}
         <div
+          style={{
+            filter: isGrayscale ? 'grayscale(100%) contrast(115%)' : 'none',
+            WebkitFilter: isGrayscale ? 'grayscale(100%) contrast(115%)' : 'none',
+          }}
           className={`bg-white shadow-2xl rounded-sm transition-all duration-300 relative border border-slate-200 flex flex-col justify-between overflow-hidden ${
-            isLandscape ? 'w-[340px] sm:w-[460px] h-[240px] sm:h-[320px]' : 'w-[240px] sm:w-[320px] h-[340px] sm:h-[460px]'
+            isSheetLandscape ? 'w-[340px] sm:w-[460px] h-[240px] sm:h-[320px]' : 'w-[240px] sm:w-[320px] h-[340px] sm:h-[460px]'
           } ${isGrayscale ? 'grayscale contrast-110' : ''}`}
         >
           {/* Duplex watermark indicator */}
           {isDuplex && (
-            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-slate-900/10 backdrop-blur rounded text-[9px] font-mono font-bold text-slate-600 uppercase">
+            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-slate-900/10 backdrop-blur rounded text-[9px] font-mono font-bold text-slate-600 uppercase z-10">
               {activeSide === 'FRONT' ? 'Side 1 (Front)' : 'Side 2 (Back)'}
             </div>
           )}
 
-          {/* N-up Grid Simulator */}
-          <div className={`p-4 h-full grid ${gridColsClass} gap-2 items-center justify-items-center`}>
-            {Array.from({ length: nUp }).map((_, idx) => {
-              const displayPageNum = (currentPage - 1) * nUp + idx + 1;
-              const hasPage = displayPageNum <= pageCount;
+          {/* Live Document Renderer / N-up Grid Simulator */}
+          <div className="w-full h-full flex flex-col justify-between overflow-hidden relative">
+            {nUp === 1 && (!isCombinedMultiUp || allDocuments.length <= 1) ? (
+              <div className="w-full h-full flex items-center justify-center p-3 overflow-hidden bg-white">
+                {isImage ? (
+                  <img
+                    src={document.previewUrl}
+                    alt={document.name}
+                    className={`max-h-full max-w-full object-contain rounded transition-all ${
+                      isGrayscale ? 'grayscale contrast-125' : ''
+                    }`}
+                  />
+                ) : (
+                  <PdfPageCanvas
+                    url={document.previewUrl}
+                    file={document.file}
+                    pageNum={currentPage}
+                    totalPages={pageCount}
+                    isGrayscale={isGrayscale}
+                    fitWidth={isLandscape ? 440 : 310}
+                    className="w-full h-full"
+                  />
+                )}
+              </div>
+            ) : (
+              <div className={`p-3 h-full grid ${gridColsClass} gap-2 items-center justify-items-center bg-slate-50/40`}>
+                {Array.from({ length: nUp }).map((_, idx) => {
+                  const targetDoc = isCombinedMultiUp && allDocuments.length > 1 ? allDocuments[idx] : null;
+                  const displayPageNum = (currentPage - 1) * nUp + idx + 1;
+                  const hasPage = targetDoc ? true : displayPageNum <= pageCount;
+                  const activeDoc = targetDoc || document;
+                  const isItemImage =
+                    activeDoc.type.startsWith('image/') ||
+                    activeDoc.name.toLowerCase().endsWith('.png') ||
+                    activeDoc.name.toLowerCase().endsWith('.jpg') ||
+                    activeDoc.name.toLowerCase().endsWith('.jpeg');
 
-              return (
-                <div
-                  key={idx}
-                  className={`w-full h-full rounded border border-slate-200/80 bg-slate-50/60 p-2 flex flex-col justify-between shadow-2xs ${
-                    hasPage ? 'opacity-100' : 'opacity-20 border-dashed'
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <div className="h-2 w-3/4 bg-slate-300 rounded-sm"></div>
-                    <div className="h-1.5 w-full bg-slate-200 rounded-sm"></div>
-                    <div className="h-1.5 w-5/6 bg-slate-200 rounded-sm"></div>
-                    <div className="h-1.5 w-4/6 bg-slate-200 rounded-sm"></div>
-                  </div>
+                  return (
+                    <div
+                      key={idx}
+                      className={`w-full h-full rounded border border-slate-200/90 bg-white p-1.5 flex flex-col justify-between shadow-xs overflow-hidden transition-all ${
+                        hasPage ? 'opacity-100' : 'opacity-25 border-dashed bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex-1 w-full flex items-center justify-center overflow-hidden min-h-0">
+                        {hasPage ? (
+                          isItemImage ? (
+                            <img
+                              src={activeDoc.previewUrl}
+                              alt={`Slot ${idx + 1}`}
+                              className={`max-h-full max-w-full object-contain ${
+                                isGrayscale ? 'grayscale contrast-125' : ''
+                              }`}
+                            />
+                          ) : (
+                            <PdfPageCanvas
+                              url={activeDoc.previewUrl}
+                              file={activeDoc.file}
+                              pageNum={targetDoc ? 1 : displayPageNum}
+                              totalPages={activeDoc.pageCount}
+                              isGrayscale={isGrayscale}
+                              fitWidth={cellFitWidth}
+                              className="w-full h-full"
+                            />
+                          )
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-slate-300">
+                            <span className="text-[10px] font-mono">Empty Slot</span>
+                          </div>
+                        )}
+                      </div>
 
-                  <div className="flex items-center justify-center">
-                    <FileText className={`w-6 h-6 ${isGrayscale ? 'text-slate-400' : 'text-blue-500'}`} />
-                  </div>
-
-                  <div className="flex items-center justify-between text-[9px] text-slate-400 font-mono">
-                    <span>{hasPage ? `Page ${displayPageNum}` : 'Empty'}</span>
-                    <span className="uppercase">{config.paperSize}</span>
-                  </div>
-                </div>
-              );
-            })}
+                      <div className="flex items-center justify-between text-[8px] text-slate-400 font-mono mt-1 pt-0.5 border-t border-slate-100">
+                        <span className="font-semibold text-slate-600 truncate max-w-[70px]">
+                          {targetDoc ? targetDoc.name : hasPage ? `Page ${displayPageNum}` : 'Empty'}
+                        </span>
+                        <span className="uppercase text-[7px] text-slate-400">{config.paperSize}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Paper Edge Bind indicator */}
@@ -138,23 +240,22 @@ export function PdfLivePreview({ document, onConfigChange }: PreviewProps) {
           className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 transition flex items-center space-x-1"
         >
           <ChevronLeft className="w-3.5 h-3.5" />
-          <span>Prev Page</span>
+          <span>Prev Sheet</span>
         </button>
 
         <span className="font-medium text-slate-700">
-          Viewing sheet {currentPage} of {Math.ceil(pageCount / nUp)}
+          Viewing sheet {currentPage} of {totalSheets}
         </span>
 
         <button
-          onClick={() => setCurrentPage((p) => Math.min(Math.ceil(pageCount / nUp), p + 1))}
-          disabled={currentPage >= Math.ceil(pageCount / nUp)}
+          onClick={() => setCurrentPage((p) => Math.min(totalSheets, p + 1))}
+          disabled={currentPage >= totalSheets}
           className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 transition flex items-center space-x-1"
         >
-          <span>Next Page</span>
+          <span>Next Sheet</span>
           <ChevronRight className="w-3.5 h-3.5" />
         </button>
       </div>
     </div>
   );
 }
-

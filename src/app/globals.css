@@ -11,5 +11,89 @@ body {
   color: rgb(var(--foreground-rgb));
   background: rgb(var(--background-rgb));
   font-feature-settings: "rlig" 1, "calt" 1;
+  -webkit-tap-highlight-color: transparent;
+  scroll-behavior: smooth;
 }
 
+/* Ambient glow mesh background */
+.ambient-bg {
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.08) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(14, 165, 233, 0.08) 0px, transparent 50%),
+    radial-gradient(at 50% 100%, rgba(99, 102, 241, 0.05) 0px, transparent 50%);
+  background-attachment: fixed;
+}
+
+/* Glassmorphic card styling */
+.glass-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.04), 0 8px 10px -6px rgba(15, 23, 42, 0.02);
+}
+
+.glass-card-hover {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.glass-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 30px -10px rgba(59, 130, 246, 0.08), 0 10px 10px -5px rgba(15, 23, 42, 0.02);
+  border-color: rgba(147, 197, 253, 0.6);
+}
+
+/* Shimmer shine animation */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.4) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2.5s infinite;
+}
+
+/* Subtle pulses and glows */
+@keyframes subtlePulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.02);
+  }
+}
+
+.animate-subtle-pulse {
+  animation: subtlePulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Modern minimalist scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}

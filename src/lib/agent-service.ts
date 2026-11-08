@@ -33,9 +33,14 @@ export async function registerPrintersLogic(
 ) {
   const shop = await verifyAgentApiKey(apiKey);
 
+  // Remove dummy placeholder printer if present
+  await prisma.shopPrinter.deleteMany({
+    where: { shopId: shop.id, name: 'Default Windows Spooler' },
+  });
+
   let registeredCount = 0;
   for (const p of printers) {
-    // Check if printer already registered by name for this shop
+    const isEpson = p.name.toLowerCase().includes('epson');
     const existing = await prisma.shopPrinter.findFirst({
       where: { shopId: shop.id, name: p.name },
     });
@@ -46,6 +51,7 @@ export async function registerPrintersLogic(
         data: {
           status: 'ONLINE',
           lastHeartbeat: new Date(),
+          isDefault: isEpson || existing.isDefault,
           supportsColor: p.supportsColor ?? existing.supportsColor,
           supportsDuplex: p.supportsDuplex ?? existing.supportsDuplex,
           paperSizes: p.paperSizes ?? existing.paperSizes,
@@ -56,17 +62,32 @@ export async function registerPrintersLogic(
         data: {
           shopId: shop.id,
           name: p.name,
-          systemDriver: p.systemDriver || 'Generic Windows Driver',
-          portName: p.portName || 'LPT1',
+          systemDriver: p.systemDriver || 'Hardware Printer Driver',
+          portName: p.portName || 'USB001',
           status: 'ONLINE',
-          isDefault: registeredCount === 0 && shop.printers.length === 0,
-          supportsColor: p.supportsColor ?? false,
+          isDefault: isEpson || registeredCount === 0,
+          supportsColor: p.supportsColor ?? true,
           supportsDuplex: p.supportsDuplex ?? true,
           paperSizes: p.paperSizes || 'A4,Letter',
         },
       });
     }
     registeredCount++;
+  }
+
+  // Ensure EPSON or first printer is active default
+  const epsonPrinter = await prisma.shopPrinter.findFirst({
+    where: { shopId: shop.id, name: { contains: 'EPSON' } },
+  });
+  if (epsonPrinter) {
+    await prisma.shopPrinter.updateMany({
+      where: { shopId: shop.id, NOT: { id: epsonPrinter.id } },
+      data: { isDefault: false },
+    });
+    await prisma.shopPrinter.update({
+      where: { id: epsonPrinter.id },
+      data: { isDefault: true, status: 'ONLINE' },
+    });
   }
 
   return { success: true, registeredCount };
@@ -132,6 +153,7 @@ export async function claimPendingJobLogic(apiKey: string) {
         id: d.id,
         filename: d.originalFilename,
         storageUrl: d.storageUrl,
+        mimeType: d.mimeType,
       })),
       jobs: updatedOrder.jobs.map((j) => ({
         id: j.id,
@@ -142,7 +164,7 @@ export async function claimPendingJobLogic(apiKey: string) {
         paperSize: j.paperSize,
         pageRange: j.pageRange,
         nUp: j.nUp,
-        targetPrinterName: j.printer?.name || shop.printers.find((p) => p.isDefault)?.name || 'Default',
+        targetPrinterName: j.printer?.name || shop.printers.find((p) => p.isDefault)?.name || 'EPSON L3250 Series',
       })),
     },
   };

@@ -10,4 +10,13 @@ coverage/
 prisma/*.db
 prisma/*.db-journal
 uploads/
+public/uploads/*
+!public/uploads/.gitkeep
+public/spooler-output/*
+!public/spooler-output/.gitkeep
+*.tsbuildinfo
+test_mono.pdf
+agent/test_print.pdf
+tests/test_spool_output.pdf
+
 

@@ -18,38 +18,41 @@ export interface CreateShopInput {
 }
 
 export async function createShopLogic(input: CreateShopInput) {
+  const cleanEmail = String(input.email || '').trim().toLowerCase();
+  const cleanPassword = String(input.password || 'PASS@123').trim();
+  const cleanSlug = String(input.slug || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+  const cleanName = String(input.name || '').trim();
+  const cleanOwnerName = String(input.ownerName || cleanName).trim();
+
   // Check slug uniqueness
   const existing = await prisma.shop.findUnique({
-    where: { slug: input.slug },
+    where: { slug: cleanSlug },
   });
   if (existing) {
-    throw new Error(`Shop slug '${input.slug}' is already taken.`);
+    throw new Error(`Shop slug '${cleanSlug}' is already taken.`);
   }
 
+  // 1. Create the shop entity
   const shop = await prisma.shop.create({
     data: {
-      name: input.name,
-      slug: input.slug,
-      ownerName: input.ownerName,
-      email: input.email,
-      mobile: input.mobile,
-      address: input.address,
-      city: input.city,
-      state: input.state,
-      pinCode: input.pinCode,
-      gstNumber: input.gstNumber,
+      name: cleanName,
+      slug: cleanSlug,
+      ownerName: cleanOwnerName,
+      email: cleanEmail,
+      mobile: String(input.mobile || '').trim(),
+      address: String(input.address || '').trim(),
+      city: String(input.city || '').trim(),
+      state: String(input.state || '').trim(),
+      pinCode: String(input.pinCode || '').trim(),
+      gstNumber: input.gstNumber ? String(input.gstNumber).trim() : null,
       commissionRate: input.commissionRate ?? 5.0,
       commissionType: input.commissionType ?? 'PERCENT',
       printMode: input.printMode ?? 'MANUAL',
       status: 'ACTIVE',
-      users: {
-        create: {
-          email: input.email,
-          password: input.password ?? 'shop123',
-          name: input.ownerName,
-          role: 'SHOP_OWNER',
-        },
-      },
       pricing: {
         create: {
           bwSingle: 2.0,
@@ -79,11 +82,44 @@ export async function createShopLogic(input: CreateShopInput) {
     },
     include: {
       pricing: true,
-      users: true,
     },
   });
 
-  return { shop };
+  // 2. Guarantee shopkeeper User account exists and has exact email + password
+  const existingUser = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { email: cleanEmail },
+        { email: String(input.email || '').trim() },
+      ],
+    },
+  });
+
+  let user;
+  if (existingUser) {
+    user = await prisma.user.update({
+      where: { id: existingUser.id },
+      data: {
+        email: cleanEmail,
+        password: cleanPassword,
+        name: cleanOwnerName,
+        role: 'SHOP_OWNER',
+        shopId: shop.id,
+      },
+    });
+  } else {
+    user = await prisma.user.create({
+      data: {
+        email: cleanEmail,
+        password: cleanPassword,
+        name: cleanOwnerName,
+        role: 'SHOP_OWNER',
+        shopId: shop.id,
+      },
+    });
+  }
+
+  return { shop: { ...shop, users: [user] } };
 }
 
 export async function getPlatformMetrics() {
@@ -100,63 +136,43 @@ export async function getPlatformMetrics() {
     prisma.shop.count({ where: { status: { in: ['INACTIVE', 'SUSPENDED'] } } }),
     prisma.order.count(),
     prisma.order.findMany({
+      where: { paymentStatus: 'SUCCESS' },
       select: {
-        status: true,
         totalAmount: true,
         platformCommission: true,
         shopEarnings: true,
-        paymentStatus: true,
+        status: true,
       },
     }),
     prisma.settlement.findMany({
       select: {
-        status: true,
         shopPayout: true,
+        status: true,
       },
     }),
   ]);
 
-  let totalCustomerPayments = 0;
-  let totalPlatformRevenue = 0;
-  let totalShopEarnings = 0;
-  let pendingOrders = 0;
-  let completedOrders = 0;
-  let cancelledOrders = 0;
+  const totalCustomerPayments = orders.reduce((sum, o) => sum + o.totalAmount, 0);
+  const totalPlatformRevenue = orders.reduce((sum, o) => sum + o.platformCommission, 0);
+  const totalShopDisbursements = orders.reduce((sum, o) => sum + o.shopEarnings, 0);
 
-  for (const order of orders) {
-    if (order.paymentStatus === 'SUCCESS') {
-      totalCustomerPayments += order.totalAmount;
-      totalPlatformRevenue += order.platformCommission;
-      totalShopEarnings += order.shopEarnings;
-    }
-    if (['UPLOADED', 'CONFIGURED', 'PAYMENT_PENDING', 'PAID', 'QUEUED', 'PRINTING'].includes(order.status)) {
-      pendingOrders++;
-    } else if (order.status === 'COMPLETED') {
-      completedOrders++;
-    } else if (['CANCELLED', 'FAILED'].includes(order.status)) {
-      cancelledOrders++;
-    }
-  }
+  const pendingSettlements = settlements
+    .filter((s) => s.status === 'PENDING')
+    .reduce((sum, s) => sum + s.shopPayout, 0);
 
-  let pendingSettlements = 0;
-  for (const s of settlements) {
-    if (s.status === 'PENDING') {
-      pendingSettlements += s.shopPayout;
-    }
-  }
+  const completedSettlements = settlements
+    .filter((s) => s.status === 'COMPLETED' || s.status === 'SETTLED')
+    .reduce((sum, s) => sum + s.shopPayout, 0);
 
   return {
     totalShops,
     activeShops,
     inactiveShops,
     totalOrders,
-    pendingOrders,
-    completedOrders,
-    cancelledOrders,
     totalCustomerPayments: Number(totalCustomerPayments.toFixed(2)),
     totalPlatformRevenue: Number(totalPlatformRevenue.toFixed(2)),
-    totalShopEarnings: Number(totalShopEarnings.toFixed(2)),
+    totalShopDisbursements: Number(totalShopDisbursements.toFixed(2)),
     pendingSettlements: Number(pendingSettlements.toFixed(2)),
+    completedSettlements: Number(completedSettlements.toFixed(2)),
   };
 }
-

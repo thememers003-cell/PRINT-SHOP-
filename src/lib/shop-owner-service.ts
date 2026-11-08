@@ -124,6 +124,13 @@ export async function dispatchManualPrintLogic(orderId: string, shopId: string, 
     timestamp: new Date().toISOString(),
   });
 
+  // Automatically trigger silent hardware spooling with 0 human touches
+  import('./spooler-service').then(({ spoolOrderDirectly }) => {
+    spoolOrderDirectly(orderId).catch((err) => {
+      console.warn('Silent hardware spooling notice:', err.message);
+    });
+  });
+
   return { order: updated };
 }
 

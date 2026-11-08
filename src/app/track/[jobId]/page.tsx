@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { TrackingTimeline } from '@/components/tracking/TrackingTimeline';
 import { DigitalReceipt } from '@/components/tracking/DigitalReceipt';
+import { PrintBroLogo } from '@/components/brand/PrintBroLogo';
 
 export default function OrderTrackingPage() {
   const params = useParams();
@@ -35,6 +36,13 @@ export default function OrderTrackingPage() {
       }
       const data = await res.json();
       setOrder(data);
+
+      // Auto-trigger payment confirmation in express kiosk mode
+      if (data?.paymentStatus === 'INITIATED' && !paying) {
+        setTimeout(() => {
+          handleSimulatePayment();
+        }, 600);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -132,12 +140,10 @@ export default function OrderTrackingPage() {
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
         <div className="max-w-5xl mx-auto px-4 h-16 sm:h-20 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="bg-blue-600 text-white p-2 sm:p-2.5 rounded-2xl shadow-md shadow-blue-500/20">
-              <Printer className="w-5 h-5 sm:w-6 sm:h-6" />
-            </div>
-            <div>
-              <span className="text-xs uppercase font-bold text-slate-400 tracking-wider">Live Tracking</span>
-              <h1 className="text-base sm:text-xl font-black text-slate-900 tracking-tight font-mono">
+            <PrintBroLogo size="sm" />
+            <div className="border-l border-slate-200 pl-3">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Live Tracking</span>
+              <h1 className="text-base sm:text-lg font-black text-slate-900 tracking-tight font-mono">
                 {order.jobId}
               </h1>
             </div>

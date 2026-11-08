@@ -103,79 +103,155 @@ async function sendHeartbeat() {
   }
 }
 
-async function createPrintReadyPdf(job, doc, cfg) {
-  const pdfDoc = await PDFDocument.create();
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+// Helper to parse page range strings like "1-3, 5"
+function parsePageRange(rangeStr, totalPages) {
+  if (!rangeStr || rangeStr.toLowerCase() === 'all') {
+    return Array.from({ length: totalPages }, (_, i) => i);
+  }
+  const indices = new Set();
+  const parts = rangeStr.split(',');
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (trimmed.includes('-')) {
+      const [start, end] = trimmed.split('-').map(Number);
+      if (!isNaN(start) && !isNaN(end)) {
+        for (let p = Math.max(1, start); p <= Math.min(totalPages, end); p++) {
+          indices.add(p - 1);
+        }
+      }
+    } else {
+      const num = Number(trimmed);
+      if (!isNaN(num) && num >= 1 && num <= totalPages) {
+        indices.add(num - 1);
+      }
+    }
+  }
+  const result = Array.from(indices).sort((a, b) => a - b);
+  return result.length > 0 ? result : Array.from({ length: totalPages }, (_, i) => i);
+}
 
-  const page = pdfDoc.addPage([595.28, 841.89]); // A4
-  const { width, height } = page.getSize();
+// Download raw document bytes from storageUrl or local public folder
+async function downloadFileBuffer(storageUrl, serverTarget) {
+  // If running locally, check if file exists directly in public/ folder
+  const cleanPath = storageUrl.startsWith('/') ? storageUrl.slice(1) : storageUrl;
+  const localFilePath = path.join(process.cwd(), 'public', cleanPath);
+  if (fs.existsSync(localFilePath)) {
+    console.log(`📁 Loading local document directly: ${localFilePath}`);
+    return fs.readFileSync(localFilePath);
+  }
 
-  // Header Banner
-  page.drawRectangle({
-    x: 40,
-    y: height - 120,
-    width: width - 80,
-    height: 70,
-    color: rgb(0.14, 0.38, 0.92),
+  // Otherwise download via HTTP/HTTPS
+  return new Promise((resolve, reject) => {
+    const fullUrl = new URL(storageUrl, serverTarget);
+    console.log(`🌐 Downloading document from: ${fullUrl.href}`);
+    const client = fullUrl.protocol === 'https:' ? https : http;
+
+    client.get(fullUrl.href, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        // Handle redirect
+        return downloadFileBuffer(res.headers.location, serverTarget).then(resolve, reject);
+      }
+      if (res.statusCode !== 200) {
+        return reject(new Error(`Failed to download document: HTTP ${res.statusCode}`));
+      }
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+    }).on('error', reject);
   });
+}
 
-  page.drawText('PRINT BRO - AUTOMATED PRINT JOB', {
-    x: 60,
-    y: height - 85,
-    size: 20,
-    font: boldFont,
-    color: rgb(1, 1, 1),
-  });
+/**
+ * Prepares the actual customer document for printing.
+ * Converts JPG/PNG to PDF, or slices PDF pages if custom pageRange is set.
+ */
+async function fetchAndPrepareDocument(job, doc, cfg, serverTarget) {
+  const rawBuffer = await downloadFileBuffer(doc.storageUrl, serverTarget);
 
-  page.drawText(`Job ID: ${job.jobId}   |   Customer: ${job.customerName || 'Walk-in'}`, {
-    x: 60,
-    y: height - 105,
-    size: 11,
-    font: regularFont,
-    color: rgb(0.9, 0.9, 0.9),
-  });
+  // If it's already an imposed / transformed print-ready PDF, return directly
+  const isPdf = rawBuffer.slice(0, 5).toString('ascii').startsWith('%PDF-');
+  if (isPdf) {
+    if (doc.storageUrl && doc.storageUrl.includes('print_ready_')) {
+      return rawBuffer;
+    }
+  }
 
-  // Body Content
-  let y = height - 170;
-  page.drawText(`Document: ${doc.filename}`, { x: 50, y, size: 14, font: boldFont });
-  y -= 25;
-  page.drawText(`Copies: ${cfg.copies || 1}  |  Color: ${cfg.colorMode}  |  Sides: ${cfg.sides}  |  Paper: ${cfg.paperSize}`, {
-    x: 50,
-    y,
-    size: 11,
-    font: regularFont,
-  });
-  y -= 20;
-  page.drawText(`Spool Time: ${new Date().toLocaleString()}`, { x: 50, y, size: 10, font: regularFont });
+  const isImage =
+    !isPdf &&
+    ((doc.mimeType && doc.mimeType.startsWith('image/')) ||
+      doc.filename.toLowerCase().endsWith('.png') ||
+      doc.filename.toLowerCase().endsWith('.jpg') ||
+      doc.filename.toLowerCase().endsWith('.jpeg'));
 
-  y -= 30;
-  page.drawLine({
-    start: { x: 50, y },
-    end: { x: width - 50, y },
-    thickness: 1,
-    color: rgb(0.8, 0.8, 0.8),
-  });
+  if (isImage) {
+    console.log(`🖼️ Converting image (${doc.filename}) into print-ready A4 PDF...`);
+    const pdfDoc = await PDFDocument.create();
+    const isPng = doc.filename.toLowerCase().endsWith('.png') || doc.mimeType === 'image/png';
+    let embeddedImg;
 
-  y -= 40;
-  page.drawText('This document was spooled via the Print Bro Headless Windows Print Agent.', {
-    x: 50,
-    y,
-    size: 12,
-    font: regularFont,
-  });
+    try {
+      embeddedImg = isPng ? await pdfDoc.embedPng(rawBuffer) : await pdfDoc.embedJpg(rawBuffer);
+    } catch (err) {
+      // Fallback try opposite embedder in case file extension differed from magic bytes
+      try {
+        embeddedImg = isPng ? await pdfDoc.embedJpg(rawBuffer) : await pdfDoc.embedPng(rawBuffer);
+      } catch (e2) {
+        throw new Error(`Failed to embed image into PDF: ${err.message}`);
+      }
+    }
 
-  y -= 25;
-  page.drawText('Official Xerox Counter Proof of Delivery.', {
-    x: 50,
-    y,
-    size: 10,
-    font: regularFont,
-    color: rgb(0.4, 0.4, 0.4),
-  });
+    // Standard A4: 595.28 x 841.89 points
+    const isImageLandscape = embeddedImg.width > embeddedImg.height;
+    const isLandscape =
+      cfg.orientation === 'LANDSCAPE' ||
+      (cfg.orientation === 'AUTO' && isImageLandscape) ||
+      (!cfg.orientation && isImageLandscape);
+    const pageWidth = isLandscape ? 841.89 : 595.28;
+    const pageHeight = isLandscape ? 595.28 : 841.89;
+    const page = pdfDoc.addPage([pageWidth, pageHeight]);
 
-  const pdfBytes = await pdfDoc.save();
-  return Buffer.from(pdfBytes);
+    // Scale image nicely with safe 24pt (~8.5mm) margins
+    const margin = 24;
+    const maxW = pageWidth - margin * 2;
+    const maxH = pageHeight - margin * 2;
+    const dims = embeddedImg.scaleToFit(maxW, maxH);
+
+    page.drawImage(embeddedImg, {
+      x: (pageWidth - dims.width) / 2,
+      y: (pageHeight - dims.height) / 2,
+      width: dims.width,
+      height: dims.height,
+    });
+
+    const pdfBytes = await pdfDoc.save();
+    return Buffer.from(pdfBytes);
+  }
+
+  // If it's an already imposed / transformed print-ready PDF, return directly
+  if (doc.storageUrl && doc.storageUrl.includes('print_ready_')) {
+    return rawBuffer;
+  }
+
+  // If it's a raw customer PDF: check if pageRange slicing is needed
+  if (cfg.pageRange && cfg.pageRange !== 'all') {
+    try {
+      console.log(`✂️ Slicing PDF page range: ${cfg.pageRange}...`);
+      const srcPdf = await PDFDocument.load(rawBuffer, { ignoreEncryption: true });
+      const destPdf = await PDFDocument.create();
+      const totalPages = srcPdf.getPageCount();
+      const pageIndices = parsePageRange(cfg.pageRange, totalPages);
+      const copiedPages = await destPdf.copyPages(srcPdf, pageIndices);
+      copiedPages.forEach((p) => destPdf.addPage(p));
+      const slicedBytes = await destPdf.save();
+      return Buffer.from(slicedBytes);
+    } catch (sliceErr) {
+      console.warn(`⚠️ Page slicing warning (${sliceErr.message}), spooling full PDF.`);
+      return rawBuffer;
+    }
+  }
+
+  // Original unmodified customer PDF
+  return rawBuffer;
 }
 
 async function pollAndProcessJobs() {
@@ -194,23 +270,24 @@ async function pollAndProcessJobs() {
     for (let i = 0; i < job.documents.length; i++) {
       const doc = job.documents[i];
       const cfg = job.jobs[i] || job.jobs[0];
-
-      console.log(`📄 Generating print-ready PDF for ${doc.filename}...`);
       const tempPath = path.join(__dirname, `temp_${job.jobId}_${i}.pdf`);
 
-      const pdfBuffer = await createPrintReadyPdf(job, doc, cfg);
-      fs.writeFileSync(tempPath, pdfBuffer);
-
-      const targetPrinter = explicitPrinter || cfg.targetPrinterName;
       try {
+        console.log(`📄 Preparing authentic document: ${doc.filename}...`);
+        const pdfBuffer = await fetchAndPrepareDocument(job, doc, cfg, serverUrl);
+        fs.writeFileSync(tempPath, pdfBuffer);
+
+        const targetPrinter = explicitPrinter || cfg.targetPrinterName;
         await spoolDocument(tempPath, targetPrinter, {
           copies: cfg.copies,
           paperSize: cfg.paperSize,
+          colorMode: cfg.colorMode,
         });
 
         if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
       } catch (err) {
-        console.error(`❌ Spool failed for ${doc.filename}:`, err.message);
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+        console.error(`❌ Process/Spool failed for ${doc.filename}:`, err.message);
         await apiRequest('POST', '/api/agent/jobs', {
           orderId: job.orderId,
           status: 'FAILED',

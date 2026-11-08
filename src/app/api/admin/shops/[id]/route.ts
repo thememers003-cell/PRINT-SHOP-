@@ -9,6 +9,10 @@ export async function PATCH(
     const { id } = params;
     const body = await request.json();
 
+    const cleanOwnerEmail = body.ownerEmail ? String(body.ownerEmail).trim().toLowerCase() : undefined;
+    const cleanPassword = body.password ? String(body.password).trim() : undefined;
+    const cleanOwnerName = body.ownerName ? String(body.ownerName).trim() : undefined;
+
     const updated = await prisma.shop.update({
       where: { id },
       data: {
@@ -19,6 +23,8 @@ export async function PATCH(
         ...(body.name ? { name: body.name } : {}),
         ...(body.mobile ? { mobile: body.mobile } : {}),
         ...(body.address ? { address: body.address } : {}),
+        ...(cleanOwnerEmail ? { email: cleanOwnerEmail } : {}),
+        ...(cleanOwnerName ? { ownerName: cleanOwnerName } : {}),
       },
       include: { pricing: true },
     });
@@ -35,8 +41,43 @@ export async function PATCH(
       });
     }
 
-    return NextResponse.json({ shop: updated });
+    // Update or create shop owner login credentials
+    if (cleanPassword || cleanOwnerEmail || cleanOwnerName) {
+      const existingUser = (await prisma.user.findFirst({
+        where: { shopId: id },
+      })) || (cleanOwnerEmail ? await prisma.user.findFirst({ where: { email: cleanOwnerEmail } }) : null);
+
+      if (existingUser) {
+        await prisma.user.update({
+          where: { id: existingUser.id },
+          data: {
+            shopId: id,
+            role: 'SHOP_OWNER',
+            ...(cleanPassword ? { password: cleanPassword } : {}),
+            ...(cleanOwnerEmail ? { email: cleanOwnerEmail } : {}),
+            ...(cleanOwnerName ? { name: cleanOwnerName } : {}),
+          },
+        });
+      } else {
+        const finalEmail = cleanOwnerEmail || String(updated.email).trim().toLowerCase();
+        const finalPassword = cleanPassword || 'PASS@123';
+        const finalName = cleanOwnerName || updated.ownerName || updated.name;
+
+        await prisma.user.create({
+          data: {
+            shopId: id,
+            email: finalEmail,
+            password: finalPassword,
+            name: finalName,
+            role: 'SHOP_OWNER',
+          },
+        });
+      }
+    }
+
+    return NextResponse.json({ shop: updated, success: true });
   } catch (error: any) {
+    console.error('Error updating shop:', error);
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 }
@@ -47,10 +88,19 @@ export async function DELETE(
 ) {
   try {
     const { id } = params;
-    await prisma.shop.delete({ where: { id } });
+    await prisma.$transaction([
+      prisma.printJob.deleteMany({ where: { order: { shopId: id } } }),
+      prisma.payment.deleteMany({ where: { order: { shopId: id } } }),
+      prisma.order.deleteMany({ where: { shopId: id } }),
+      prisma.document.deleteMany({ where: { shopId: id } }),
+      prisma.shopPrinter.deleteMany({ where: { shopId: id } }),
+      prisma.shopPricing.deleteMany({ where: { shopId: id } }),
+      prisma.settlement.deleteMany({ where: { shopId: id } }),
+      prisma.user.deleteMany({ where: { shopId: id } }),
+      prisma.shop.delete({ where: { id } }),
+    ]);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 }
-
