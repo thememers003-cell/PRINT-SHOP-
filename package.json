@@ -11,11 +11,16 @@
     "test:watch": "vitest",
     "db:push": "prisma db push",
     "db:seed": "node --loader ts-node/esm prisma/seed.ts",
+    "db:ensure-seed": "node prisma/ensure-seed.js",
     "agent": "node agent/agent.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
     "@types/canvas-confetti": "^1.9.0",
+    "@types/node": "^20.17.9",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "framer-motion": "^14.10.1",
@@ -24,20 +29,16 @@
     "pdf-lib": "^1.17.1",
     "pdf-to-printer": "^5.8.1",
     "pdfjs-dist": "^3.11.174",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "tailwind-merge": "^2.5.5"
-  },
-  "devDependencies": {
-    "@types/node": "^20.17.9",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
     "prisma": "^5.22.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.5.5",
     "tailwindcss": "^3.4.15",
+    "typescript": "^5.7.2"
+  },
+  "devDependencies": {
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }
 }

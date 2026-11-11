@@ -12,6 +12,20 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  async rewrites() {
+    return {
+      beforeFiles: [
+        {
+          source: '/uploads/:path*',
+          destination: '/api/files/uploads/:path*',
+        },
+        {
+          source: '/spooler-output/:path*',
+          destination: '/api/files/spooler-output/:path*',
+        },
+      ],
+    };
+  },
 };
 
 module.exports = nextConfig;

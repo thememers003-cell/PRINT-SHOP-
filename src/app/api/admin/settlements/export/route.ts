@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getSettlementLedgerData, generateSettlementCsv } from '@/lib/settlement';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     const { shopLedgers } = await getSettlementLedgerData();

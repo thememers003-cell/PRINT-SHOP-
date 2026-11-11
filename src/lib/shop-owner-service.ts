@@ -124,12 +124,15 @@ export async function dispatchManualPrintLogic(orderId: string, shopId: string, 
     timestamp: new Date().toISOString(),
   });
 
-  // Automatically trigger silent hardware spooling with 0 human touches
-  import('./spooler-service').then(({ spoolOrderDirectly }) => {
-    spoolOrderDirectly(orderId).catch((err) => {
-      console.warn('Silent hardware spooling notice:', err.message);
+  // On local Windows host, trigger silent hardware spooling immediately.
+  // On Linux cloud servers (e.g. Render), leave status QUEUED for the remote Windows Print Agent to claim.
+  if (process.platform === 'win32') {
+    import('./spooler-service').then(({ spoolOrderDirectly }) => {
+      spoolOrderDirectly(orderId).catch((err) => {
+        console.warn('Silent hardware spooling notice:', err.message);
+      });
     });
-  });
+  }
 
   return { order: updated };
 }

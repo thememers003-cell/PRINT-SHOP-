@@ -85,8 +85,9 @@ export async function POST(request: Request) {
       timestamp: new Date().toISOString(),
     });
 
-    // In AUTO mode: immediately trigger 100% silent hardware spooling with zero human intervention!
-    if (isAutoPrint) {
+    // In AUTO mode on local Windows host: immediately trigger silent hardware spooling.
+    // On Linux cloud servers (e.g. Render), leave status QUEUED for the remote Windows Print Agent to claim.
+    if (isAutoPrint && process.platform === 'win32') {
       import('@/lib/spooler-service').then(({ spoolOrderDirectly }) => {
         spoolOrderDirectly(order.id).catch((spoolErr) => {
           console.warn('Auto silent spool fallback notice:', spoolErr.message);
