@@ -12,7 +12,8 @@ async function ensureSeed() {
     if (shopCount === 0 && userCount === 0) {
       console.log('Empty database detected — running initial seed...');
       await prisma.$disconnect();
-      require('./seed.js');
+      const { main } = require('./seed.js');
+      await main();
     } else {
       console.log(`Database already initialized (${shopCount} shops, ${userCount} users) — skipping seed.`);
       await prisma.$disconnect();
