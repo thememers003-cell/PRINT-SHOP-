@@ -131,6 +131,7 @@ function DashboardContent() {
               body: JSON.stringify({
                 orderId: order.id,
                 shopId: json.shop.id,
+                manual: false,
               }),
             }).catch(console.error);
           }
@@ -327,6 +328,7 @@ function DashboardContent() {
         body: JSON.stringify({
           orderId,
           shopId: data.shop.id,
+          manual: true,
         }),
       });
 
@@ -335,6 +337,10 @@ function DashboardContent() {
         return;
       }
       await fetchDashboard();
+      // Poll once more after 2 seconds so virtual cloud spool transition reflects cleanly
+      setTimeout(() => {
+        fetchDashboard();
+      }, 2000);
     } catch (e) {
       console.error(e);
       alert('Error dispatching job.');
@@ -1847,9 +1853,13 @@ function DashboardContent() {
                           )}
 
                           {/* VIEW PRINT FILE: Open exact spooled/merged PDF */}
-                          {order.status === 'COMPLETED' && (
+                          {['QUEUED', 'PRINTING', 'COMPLETED'].includes(order.status) && (
                             <a
-                              href={`/spooler-output/order_${order.jobId}.pdf`}
+                              href={
+                                order.jobs?.[0]?.printReadyUrl ||
+                                order.documents?.[0]?.storageUrl ||
+                                `/spooler-output/order_${order.jobId}.pdf`
+                              }
                               target="_blank"
                               rel="noopener noreferrer"
                               className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs transition inline-flex items-center space-x-1.5 active:scale-95 border border-blue-200/80 shadow-2xs"

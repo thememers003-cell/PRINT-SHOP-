@@ -1,5 +1,6 @@
 import { prisma } from './prisma';
 import { orderEvents } from './sse';
+import { markAgentActive } from './agent-registry';
 
 export async function verifyAgentApiKey(apiKey: string) {
   if (!apiKey) {
@@ -32,6 +33,7 @@ export async function registerPrintersLogic(
   }>
 ) {
   const shop = await verifyAgentApiKey(apiKey);
+  markAgentActive(shop.id);
 
   // Remove dummy placeholder printer if present
   await prisma.shopPrinter.deleteMany({
@@ -95,6 +97,7 @@ export async function registerPrintersLogic(
 
 export async function claimPendingJobLogic(apiKey: string) {
   const shop = await verifyAgentApiKey(apiKey);
+  markAgentActive(shop.id);
 
   // Find oldest QUEUED order for this shop
   const order = await prisma.order.findFirst({
@@ -164,6 +167,7 @@ export async function claimPendingJobLogic(apiKey: string) {
         paperSize: j.paperSize,
         pageRange: j.pageRange,
         nUp: j.nUp,
+        printReadyUrl: j.printReadyUrl,
         targetPrinterName: j.printer?.name || shop.printers.find((p) => p.isDefault)?.name || 'EPSON L3250 Series',
       })),
     },
@@ -217,6 +221,7 @@ export async function reportJobStatusLogic(
 
 export async function updateAgentHeartbeatLogic(apiKey: string) {
   const shop = await verifyAgentApiKey(apiKey);
+  markAgentActive(shop.id);
 
   await prisma.shopPrinter.updateMany({
     where: { shopId: shop.id },

@@ -1,5 +1,6 @@
 import { prisma } from './prisma';
 import { orderEvents } from './sse';
+import { isShopAgentOnline } from './agent-registry';
 
 export async function getShopDashboardData(shopId: string) {
   const shop = await prisma.shop.findUnique({
@@ -85,7 +86,12 @@ export async function getShopDashboardData(shopId: string) {
   };
 }
 
-export async function dispatchManualPrintLogic(orderId: string, shopId: string, printerId?: string) {
+export async function dispatchManualPrintLogic(
+  orderId: string,
+  shopId: string,
+  printerId?: string,
+  manual = false
+) {
   const order = await prisma.order.findFirst({
     where: { id: orderId, shopId },
     include: { jobs: true },
@@ -112,6 +118,7 @@ export async function dispatchManualPrintLogic(orderId: string, shopId: string, 
     },
     include: {
       jobs: true,
+      documents: true,
       shop: true,
     },
   });
@@ -124,9 +131,15 @@ export async function dispatchManualPrintLogic(orderId: string, shopId: string, 
     timestamp: new Date().toISOString(),
   });
 
-  // On local Windows host, trigger silent hardware spooling immediately.
-  // On Linux cloud servers (e.g. Render), leave status QUEUED for the remote Windows Print Agent to claim.
-  if (process.platform === 'win32') {
+  const agentOnline = isShopAgentOnline(shopId);
+  const printUrl =
+    updated.jobs?.[0]?.printReadyUrl ||
+    updated.documents?.[0]?.storageUrl ||
+    `/spooler-output/order_${updated.jobId}.pdf`;
+
+  // Run server-side spooler on local Windows host, OR during explicit manual testing in cloud when no remote agent is connected.
+  // When remote Windows Print Agent is online, keep QUEUED so agent.js downloads and prints on physical hardware.
+  if (process.platform === 'win32' || (manual && !agentOnline)) {
     import('./spooler-service').then(({ spoolOrderDirectly }) => {
       spoolOrderDirectly(orderId).catch((err) => {
         console.warn('Silent hardware spooling notice:', err.message);
@@ -134,7 +147,11 @@ export async function dispatchManualPrintLogic(orderId: string, shopId: string, 
     });
   }
 
-  return { order: updated };
+  return {
+    order: updated,
+    agentOnline,
+    printUrl,
+  };
 }
 
 export async function updateOrderStatusLogic(orderId: string, shopId: string, status: string) {

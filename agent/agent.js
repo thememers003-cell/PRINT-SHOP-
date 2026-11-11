@@ -132,12 +132,17 @@ function parsePageRange(rangeStr, totalPages) {
 
 // Download raw document bytes from storageUrl or local public folder
 async function downloadFileBuffer(storageUrl, serverTarget) {
-  // If running locally, check if file exists directly in public/ folder
-  const cleanPath = storageUrl.startsWith('/') ? storageUrl.slice(1) : storageUrl;
-  const localFilePath = path.join(process.cwd(), 'public', cleanPath);
-  if (fs.existsSync(localFilePath)) {
-    console.log(`📁 Loading local document directly: ${localFilePath}`);
-    return fs.readFileSync(localFilePath);
+  const isLocalServer =
+    serverTarget.includes('localhost') || serverTarget.includes('127.0.0.1');
+
+  // Only read from local public/ folder when targeting localhost directly
+  if (isLocalServer) {
+    const cleanPath = storageUrl.startsWith('/') ? storageUrl.slice(1) : storageUrl;
+    const localFilePath = path.join(process.cwd(), 'public', cleanPath);
+    if (fs.existsSync(localFilePath)) {
+      console.log(`📁 Loading local document directly: ${localFilePath}`);
+      return fs.readFileSync(localFilePath);
+    }
   }
 
   // Otherwise download via HTTP/HTTPS
@@ -266,9 +271,23 @@ async function pollAndProcessJobs() {
     console.log(`   Customer : ${job.customerName}`);
     console.log(`   Files    : ${job.documents.map((d) => d.filename).join(', ')}`);
 
+    // If checkout generated a unified master print-ready PDF for all documents, spool it once
+    const masterUrl = job.jobs?.[0]?.printReadyUrl;
+    const hasMasterOrderPdf = masterUrl && masterUrl.includes('print_ready_order_');
+    const docsToPrint = hasMasterOrderPdf
+      ? [
+          {
+            id: job.documents[0]?.id || 'master',
+            filename: `${job.jobId}_merged.pdf`,
+            storageUrl: masterUrl,
+            mimeType: 'application/pdf',
+          },
+        ]
+      : job.documents;
+
     // Process each document in the job
-    for (let i = 0; i < job.documents.length; i++) {
-      const doc = job.documents[i];
+    for (let i = 0; i < docsToPrint.length; i++) {
+      const doc = docsToPrint[i];
       const cfg = job.jobs[i] || job.jobs[0];
       const tempPath = path.join(__dirname, `temp_${job.jobId}_${i}.pdf`);
 

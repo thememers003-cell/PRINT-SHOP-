@@ -268,6 +268,22 @@ export async function createOrderCheckoutLogic(input: CheckoutInput) {
     });
   }
 
+  // Persist a ready-to-inspect spooler copy immediately at checkout so "View Printout" works on both Windows and Linux cloud hosts
+  const primaryPrintUrl = masterPrintReadyUrl || order.documents[0]?.storageUrl;
+  if (primaryPrintUrl && primaryPrintUrl.startsWith('/')) {
+    try {
+      const sourcePath = path.join(process.cwd(), 'public', primaryPrintUrl.replace(/^\//, ''));
+      const sourceExists = await fs.stat(sourcePath).then(() => true).catch(() => false);
+      if (sourceExists) {
+        const spoolOutputDir = path.join(process.cwd(), 'public', 'spooler-output');
+        await fs.mkdir(spoolOutputDir, { recursive: true });
+        await fs.copyFile(sourcePath, path.join(spoolOutputDir, `order_${jobId}.pdf`));
+      }
+    } catch (copyErr) {
+      console.warn('Spooler preview copy warning:', copyErr);
+    }
+  }
+
   // 5. Initiate Payment
   const paymentDetails = await initiatePaymentOrder({
     orderId: order.id,

@@ -14,6 +14,11 @@ export function DigitalReceipt({ order }: ReceiptProps) {
   };
 
   const isCompleted = order.status === 'COMPLETED';
+  const printoutUrl =
+    order.jobs?.[0]?.printReadyUrl ||
+    order.documents?.[0]?.storageUrl ||
+    `/spooler-output/order_${order.jobId}.pdf`;
+  const canViewPrintout = ['QUEUED', 'PRINTING', 'COMPLETED'].includes(order.status);
 
   return (
     <motion.div 
@@ -28,9 +33,9 @@ export function DigitalReceipt({ order }: ReceiptProps) {
           <p className="text-xs text-slate-500 font-medium">Official Proof of Payment &amp; Print Specs</p>
         </div>
         <div className="flex items-center space-x-2">
-          {isCompleted && (
+          {(isCompleted || canViewPrintout) && (
             <a
-              href={`/spooler-output/order_${order.jobId}.pdf`}
+              href={printoutUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="px-3.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold transition flex items-center space-x-1.5 border border-blue-200/80 cursor-pointer shadow-2xs"

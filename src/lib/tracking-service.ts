@@ -52,6 +52,7 @@ export async function getOrderTrackingLogic(jobId: string) {
       name: d.originalFilename,
       pages: d.pageCount,
       size: d.fileSize,
+      storageUrl: d.storageUrl,
     })),
     jobs: order.jobs.map((j) => ({
       id: j.id,
@@ -61,6 +62,7 @@ export async function getOrderTrackingLogic(jobId: string) {
       paperSize: j.paperSize,
       nUp: j.nUp,
       status: j.printStatus,
+      printReadyUrl: j.printReadyUrl,
       printerName: j.printer?.name,
     })),
   };
