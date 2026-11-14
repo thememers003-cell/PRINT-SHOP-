@@ -133,7 +133,17 @@ function DashboardContent() {
                 shopId: json.shop.id,
                 manual: false,
               }),
-            }).catch(console.error);
+            })
+              .then(async (res) => {
+                if (res.ok) {
+                  const printData = await res.json();
+                  // Fallback: If no Windows Agent is running on this counter system, trigger direct browser kiosk print!
+                  if (!printData.agentOnline && printData.printUrl) {
+                    triggerBrowserPrint(printData.printUrl);
+                  }
+                }
+              })
+              .catch(console.error);
           }
         }
       }
@@ -335,6 +345,11 @@ function DashboardContent() {
       if (!res.ok) {
         alert('Failed to dispatch print job');
         return;
+      }
+      const resData = await res.json();
+      // If no native Windows Print Agent is running on this counter PC, execute instant browser kiosk print
+      if (!resData.agentOnline && resData.printUrl) {
+        triggerBrowserPrint(resData.printUrl);
       }
       await fetchDashboard();
       // Poll once more after 2 seconds so virtual cloud spool transition reflects cleanly

@@ -208,23 +208,29 @@ async function spoolDocument(filePath, targetPrinterName, options = {}) {
   const initialJobIds = initialJobs.map((j) => j.Id);
 
   // 2. Force print command to the physical Windows Spooler
-  console.log(`🚀 FORCING PRINT COMMAND TO WINDOWS SPOOLER: Printer '${chosenPrinter}' (copies: ${options.copies || 1}, colorMode: ${options.colorMode || 'COLOR'})...`);
+  const isBw = options.colorMode === 'BW';
+  const isDuplex = options.sides === 'DUPLEX' || options.sides === 'duplex';
+  const paperSize = options.paperSize || 'A4';
+  const orientation = options.orientation ? String(options.orientation).toLowerCase() : undefined;
+
+  console.log(`🚀 FORCING PRINT COMMAND TO WINDOWS SPOOLER: Printer '${chosenPrinter}' (copies: ${options.copies || 1}, colorMode: ${isBw ? 'BW' : 'COLOR'}, sides: ${isDuplex ? 'DUPLEX' : 'SINGLE'}, paperSize: ${paperSize})...`);
   const printOptions = {
     printer: chosenPrinter,
-    paperSize: 'A4',
+    paperSize: paperSize,
     scale: 'shrink',
+    side: isDuplex ? 'duplex' : 'simplex',
+    monochrome: isBw,
   };
   if (options.copies && options.copies > 1) {
     printOptions.copies = options.copies;
   }
+  if (orientation === 'landscape' || orientation === 'portrait') {
+    printOptions.orientation = orientation;
+  }
 
-  const isBw = options.colorMode === 'BW';
   if (isBw) {
     console.log(`🖤 Forcing printer '${chosenPrinter}' driver to hardware MONOCHROME (B&W) mode...`);
     await setPrinterMonochromeMode(chosenPrinter, true);
-    // Do NOT pass printOptions.monochrome = true to SumatraPDF.
-    // SumatraPDF's built-in GDI dithering generates coarse 1-bit Bayer scan lines and zooms the viewport.
-    // The printer hardware driver handles high-precision black & white natively!
   } else {
     console.log(`🎨 Printer '${chosenPrinter}' driver set to COLOR mode...`);
     await setPrinterMonochromeMode(chosenPrinter, false);

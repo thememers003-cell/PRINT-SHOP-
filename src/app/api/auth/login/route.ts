@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { setSessionCookie } from '@/lib/session';
+import { verifyPassword, hashPassword } from '@/lib/auth-crypto';
 
 export const runtime = 'nodejs';
 
@@ -19,8 +20,14 @@ export async function POST(request: Request) {
     const cleanEmail = rawEmail.toLowerCase();
     const cleanPassword = String(password).trim();
 
-    // 1. Look up user by email (case-insensitive in SQLite by checking all users in memory)
-    const allUsers = await prisma.user.findMany({
+    // 1. Direct indexed look up user by email
+    let user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: cleanEmail },
+          { email: rawEmail },
+        ],
+      },
       include: {
         shop: {
           select: {
@@ -33,27 +40,21 @@ export async function POST(request: Request) {
       },
     });
 
-    let user = allUsers.find(
-      (u) =>
-        u.email.trim().toLowerCase() === cleanEmail ||
-        u.email.trim() === rawEmail
-    );
-
     // 2. If not found in User table, check if the input matches any Shop's email or slug
     if (!user) {
-      const allShops = await prisma.shop.findMany({
+      const shop = await prisma.shop.findFirst({
+        where: {
+          OR: [
+            { email: cleanEmail },
+            { slug: cleanEmail },
+            { email: rawEmail },
+            { slug: rawEmail },
+          ],
+        },
         include: {
           users: true,
         },
       });
-
-      const shop = allShops.find(
-        (s) =>
-          s.email.trim().toLowerCase() === cleanEmail ||
-          s.slug.trim().toLowerCase() === cleanEmail ||
-          s.email.trim() === rawEmail ||
-          s.slug.trim() === rawEmail
-      );
 
       if (shop) {
         // If shop has an existing owner user, use it
@@ -70,11 +71,11 @@ export async function POST(request: Request) {
           } as any;
         } else {
           // Self-healing: Shop exists but User record was missing!
-          // Auto-create the shop owner User record immediately so login succeeds!
+          // Auto-create the shop owner User record immediately with secure password
           const newUser = await prisma.user.create({
             data: {
               email: cleanEmail,
-              password: cleanPassword || 'PASS@123',
+              password: hashPassword(cleanPassword),
               name: shop.ownerName || shop.name,
               role: 'SHOP_OWNER',
               shopId: shop.id,
@@ -100,26 +101,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // 3. Password verification
-    let isValidPassword = false;
-    const dbPassword = String(user.password || '').trim();
-
-    // A. Master admin password
-    if (user.role === 'SUPER_ADMIN' && cleanPassword === 'PASS@123') {
-      isValidPassword = true;
-    }
-    // B. Exact match with stored database password
-    else if (dbPassword === cleanPassword) {
-      isValidPassword = true;
-    }
-    // C. Case-insensitive PASS@123 match
-    else if (cleanPassword.toUpperCase() === 'PASS@123' && dbPassword.toUpperCase() === 'PASS@123') {
-      isValidPassword = true;
-    }
-    // D. Default fallback password decided by Admin for initial onboarding
-    else if (cleanPassword === 'PASS@123') {
-      isValidPassword = true;
-    }
+    // 3. Secure password verification (no backdoors)
+    const isValidPassword = verifyPassword(cleanPassword, user.password);
 
     if (!isValidPassword) {
       return NextResponse.json(

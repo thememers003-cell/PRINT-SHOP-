@@ -99,11 +99,27 @@ describe('Runtime File Serving API (/api/files/[...path])', () => {
     expect(traversal.status).toBe(403);
   });
 
-  it('returns 404 when file does not exist', async () => {
+  it('returns 404 when file does not exist and has no associated order', async () => {
     const missing = await GET(new Request('http://localhost/api/files/uploads/test-runtime-shop/nope.pdf'), {
       params: { path: ['uploads', 'test-runtime-shop', 'nope.pdf'] },
     });
     expect(missing.status).toBe(404);
+  });
+
+  it('generates an authentic emergency PDF voucher when disk file is deleted on restart', async () => {
+    // Delete test file from disk to simulate Render container wipe
+    await fs.rm(testFile, { force: true });
+
+    const req = new Request(`http://localhost/api/files/spooler-output/order_${fallbackJobId}.pdf`);
+    const res = await GET(req, {
+      params: { path: ['spooler-output', `order_${fallbackJobId}.pdf`] },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/pdf');
+    const buf = Buffer.from(await res.arrayBuffer());
+    // PDF Magic bytes
+    expect(buf.slice(0, 5).toString('ascii')).toBe('%PDF-');
   });
 
   it('tracks live agent polling activity accurately', () => {

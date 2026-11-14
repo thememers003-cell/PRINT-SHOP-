@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { prisma } from '@/lib/prisma';
+import { generateEmergencyOrderPdf } from '@/lib/emergency-pdf';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -66,18 +67,54 @@ export async function GET(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    let fileBuffer: Buffer;
+    let fileBuffer: Buffer | null = null;
     try {
       fileBuffer = await fs.readFile(targetPath);
     } catch (readErr: any) {
-      if (readErr?.code === 'ENOENT' && segments[0] === 'spooler-output') {
-        const match = segments[1]?.match(/^order_(.+)\.pdf$/i);
-        const fallbackPath = match ? await resolveFallbackOrderFile(match[1]) : null;
-        if (!fallbackPath) {
+      if (readErr?.code === 'ENOENT') {
+        // 1. Spooler output request fallback
+        if (segments[0] === 'spooler-output') {
+          const match = segments[1]?.match(/^order_(.+)\.pdf$/i);
+          if (match) {
+            const jobId = match[1];
+            // Try reading from uploads folder first
+            const fallbackPath = await resolveFallbackOrderFile(jobId);
+            if (fallbackPath) {
+              try {
+                fileBuffer = await fs.readFile(fallbackPath);
+                targetPath = fallbackPath;
+              } catch {}
+            }
+            // If still missing (e.g. wiped on Render ephemeral restart), generate fresh authentic PDF on the fly!
+            if (!fileBuffer) {
+              fileBuffer = await generateEmergencyOrderPdf(jobId);
+              if (fileBuffer) {
+                targetPath = path.resolve(baseDir, segments[1]);
+              }
+            }
+          }
+        }
+        // 2. Uploads request fallback if file was deleted during cold restart
+        else if (segments[0] === 'uploads') {
+          const requestedRel = '/' + segments.join('/');
+          const doc = await prisma.document.findFirst({
+            where: {
+              OR: [
+                { storageUrl: requestedRel },
+                { fileKey: segments[segments.length - 1] },
+              ],
+            },
+            include: { order: true },
+          });
+
+          if (doc?.order?.jobId) {
+            fileBuffer = await generateEmergencyOrderPdf(doc.order.jobId);
+          }
+        }
+
+        if (!fileBuffer) {
           return NextResponse.json({ error: 'File not found' }, { status: 404 });
         }
-        targetPath = fallbackPath;
-        fileBuffer = await fs.readFile(targetPath);
       } else {
         throw readErr;
       }

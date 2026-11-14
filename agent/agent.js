@@ -301,6 +301,8 @@ async function pollAndProcessJobs() {
           copies: cfg.copies,
           paperSize: cfg.paperSize,
           colorMode: cfg.colorMode,
+          sides: cfg.sides,
+          orientation: cfg.orientation,
         });
 
         if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);

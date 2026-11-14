@@ -312,16 +312,24 @@ async function executeSingleOrderPrint(orderId: string, printerNameOverride?: st
     await setPrinterMonochromeMode(targetPrinter, false);
   }
 
+  const isDuplex = firstJob?.sides === 'DUPLEX';
+  const orientation = firstJob?.orientation ? String(firstJob.orientation).toLowerCase() : undefined;
+
   const printOptions: any = {
     printer: targetPrinter,
     paperSize: firstJob?.paperSize || 'A4',
     scale: 'shrink',
+    side: isDuplex ? 'duplex' : 'simplex',
+    monochrome: isBw,
   };
   if (copies > 1) {
     printOptions.copies = copies;
   }
+  if (orientation === 'landscape' || orientation === 'portrait') {
+    printOptions.orientation = orientation;
+  }
 
-  console.log(`🖨️ [SPOOLER-SERVICE] Silent hardware print dispatched: [${order.jobId}] -> '${targetPrinter}' (${copies} copies, ${isBw ? 'B&W' : 'Color'})`);
+  console.log(`🖨️ [SPOOLER-SERVICE] Silent hardware print dispatched: [${order.jobId}] -> '${targetPrinter}' (${copies} copies, ${isBw ? 'B&W' : 'Color'}, ${isDuplex ? 'DUPLEX' : 'SINGLE'})`);
 
   // Persist a copy to public/spooler-output for virtual inspection and headless testing
   const spoolOutputDir = path.join(process.cwd(), 'public', 'spooler-output');
