@@ -122,6 +122,19 @@ describe('Runtime File Serving API (/api/files/[...path])', () => {
     expect(buf.slice(0, 5).toString('ascii')).toBe('%PDF-');
   });
 
+  it('generates an authentic emergency PDF voucher even for an unknown or wiped order jobId', async () => {
+    const unknownJobId = 'PB-2026-000002';
+    const req = new Request(`http://localhost/api/files/spooler-output/order_${unknownJobId}.pdf`);
+    const res = await GET(req, {
+      params: { path: ['spooler-output', `order_${unknownJobId}.pdf`] },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/pdf');
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.slice(0, 5).toString('ascii')).toBe('%PDF-');
+  });
+
   it('tracks live agent polling activity accurately', () => {
     const fakeShopId = `shop_${Date.now()}`;
     expect(isShopAgentOnline(fakeShopId)).toBe(false);

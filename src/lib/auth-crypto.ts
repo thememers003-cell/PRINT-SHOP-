@@ -30,3 +30,4 @@ export function verifyPassword(password: string, storedHash: string): boolean {
   if (bufA.length !== bufB.length) return false;
   return crypto.timingSafeEqual(bufA, bufB);
 }
+

@@ -137,9 +137,10 @@ export async function dispatchManualPrintLogic(
     updated.documents?.[0]?.storageUrl ||
     `/spooler-output/order_${updated.jobId}.pdf`;
 
-  // Run server-side spooler on local Windows host, OR during explicit manual testing in cloud when no remote agent is connected.
+  // Run server-side spooler on local Windows host.
   // When remote Windows Print Agent is online, keep QUEUED so agent.js downloads and prints on physical hardware.
-  if (process.platform === 'win32' || (manual && !agentOnline)) {
+  // On cloud (Linux), if no agent is connected, still keep QUEUED — the dashboard browser kiosk fallback will print.
+  if (process.platform === 'win32' && !agentOnline) {
     import('./spooler-service').then(({ spoolOrderDirectly }) => {
       spoolOrderDirectly(orderId).catch((err) => {
         console.warn('Silent hardware spooling notice:', err.message);

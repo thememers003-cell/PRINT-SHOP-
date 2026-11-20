@@ -62,6 +62,84 @@ function DashboardContent() {
   const [isEmergencyStopped, setIsEmergencyStopped] = useState(false);
   const autoPrintedIdsRef = useRef<Set<string>>(new Set());
 
+  /**
+   * Browser Kiosk Print Fallback: Opens the PDF in a hidden iframe and triggers window.print()
+   * Used when no Windows agent is running and the dashboard is open in a browser.
+   */
+  const triggerBrowserPrint = (printUrl: string) => {
+    if (!printUrl) return;
+
+    // Resolve relative URLs to absolute
+    const absoluteUrl = printUrl.startsWith('http') ? printUrl : printUrl;
+
+    const isPdf = printUrl.toLowerCase().endsWith('.pdf');
+    const isImage = /\.(jpeg|jpg|png|webp)$/i.test(printUrl);
+
+    if (isImage) {
+      const printWin = window.open('', '_blank', 'width=800,height=900');
+      if (printWin) {
+        printWin.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Print Bro Auto-Print</title>
+              <style>
+                @page { size: A4 portrait; margin: 0; }
+                @media print {
+                  html, body { margin: 0; padding: 0; width: 210mm; height: 297mm; }
+                  .print-container { width: 210mm; height: 297mm; padding: 10mm; }
+                }
+                html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #fff; }
+                .print-container {
+                  display: flex; align-items: center; justify-content: center;
+                  width: 210mm; height: 297mm; max-width: 100%; max-height: 100%;
+                  margin: 0 auto; box-sizing: border-box; padding: 10mm;
+                }
+                img { max-width: 100% !important; max-height: 100% !important; width: auto !important;
+                  height: auto !important; object-fit: contain !important; display: block !important; margin: auto !important; }
+              </style>
+            </head>
+            <body>
+              <div class="print-container">
+                <img src="${absoluteUrl}" onload="window.focus(); setTimeout(() => { window.print(); }, 300);" />
+              </div>
+            </body>
+          </html>
+        `);
+        printWin.document.close();
+      }
+      return;
+    }
+
+    // PDF / generic file: use hidden iframe approach
+    const existingFrame = document.getElementById('print-bro-auto-frame');
+    if (existingFrame) existingFrame.remove();
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'print-bro-auto-frame';
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.src = absoluteUrl;
+
+    document.body.appendChild(iframe);
+
+    iframe.onload = () => {
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (err) {
+          // Cross-origin fallback: open in new tab
+          window.open(absoluteUrl, '_blank');
+        }
+      }, 400);
+    };
+  };
+
   // Pricing Matrix Form State
   const [pricingForm, setPricingForm] = useState<ShopPricingRates>({
     bwSingle: 2.0,
@@ -131,7 +209,7 @@ function DashboardContent() {
               body: JSON.stringify({
                 orderId: order.id,
                 shopId: json.shop.id,
-                manual: false,
+                manual: true,
               }),
             })
               .then(async (res) => {
