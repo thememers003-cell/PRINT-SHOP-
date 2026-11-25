@@ -12,7 +12,7 @@ export interface SessionPayload {
   loginTime: number;
 }
 
-const COOKIE_NAME = 'printbro_session';
+export const COOKIE_NAME = 'printbro_session';
 const SECRET_KEY = process.env.SESSION_SECRET || 'printbro_super_secret_session_key_2026_xyz';
 
 /**

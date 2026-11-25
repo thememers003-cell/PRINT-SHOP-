@@ -141,6 +141,7 @@ export async function claimPendingJobLogic(apiKey: string) {
   // Emit SSE live update
   orderEvents.emit('statusUpdate', {
     jobId: order.jobId,
+    shopId: shop.id,
     status: 'PRINTING',
     paymentStatus: order.paymentStatus,
     timestamp: new Date().toISOString(),
@@ -211,6 +212,7 @@ export async function reportJobStatusLogic(
   // Emit SSE live event
   orderEvents.emit('statusUpdate', {
     jobId: order.jobId,
+    shopId: shop.id,
     status: payload.status,
     paymentStatus: order.paymentStatus,
     timestamp: new Date().toISOString(),

@@ -44,6 +44,7 @@ import {
 } from 'lucide-react';
 import { sounds } from '@/lib/sound-effects';
 import { calculateJobPrice, calculateOrderTotal, ShopPricingRates } from '@/lib/pricing';
+import { enqueueBrowserPrint } from '@/lib/browser-print';
 
 function DashboardContent() {
   const searchParams = useSearchParams();
@@ -60,84 +61,75 @@ function DashboardContent() {
   const [copiedKiosk, setCopiedKiosk] = useState(false);
   const [copiedApiKey, setCopiedApiKey] = useState(false);
   const [isEmergencyStopped, setIsEmergencyStopped] = useState(false);
+  const [browserPrintBanner, setBrowserPrintBanner] = useState<{
+    phase: 'PREPARING' | 'PRINTING' | 'COMPLETED' | 'FAILED';
+    message: string;
+  } | null>(null);
   const autoPrintedIdsRef = useRef<Set<string>>(new Set());
+  const selectedShopIdRef = useRef<string | null>(paramShopId || null);
+  const isEmergencyStoppedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    selectedShopIdRef.current = selectedShopId;
+  }, [selectedShopId]);
+
+  useEffect(() => {
+    isEmergencyStoppedRef.current = isEmergencyStopped;
+  }, [isEmergencyStopped]);
 
   /**
-   * Browser Kiosk Print Fallback: Opens the PDF in a hidden iframe and triggers window.print()
-   * Used when no Windows agent is running and the dashboard is open in a browser.
+   * Browser Kiosk Auto-Print Dispatcher:
+   * Enqueues the exact print-ready document (with copies, B&W grayscale, orientation & paper size)
+   * into the sequential high-DPI browser print pipeline and updates order status to COMPLETED.
    */
-  const triggerBrowserPrint = (printUrl: string) => {
-    if (!printUrl) return;
+  const dispatchOrderToBrowserPrinter = (order: any, printUrl: string, shopId: string) => {
+    if (!printUrl || !order) return;
+    const job = order.jobs?.[0];
 
-    // Resolve relative URLs to absolute
-    const absoluteUrl = printUrl.startsWith('http') ? printUrl : printUrl;
+    enqueueBrowserPrint({
+      orderId: order.id,
+      jobId: order.jobId,
+      printUrl,
+      fallbackUrl: `/spooler-output/order_${order.jobId}.pdf`,
+      colorMode: job?.colorMode || 'BW',
+      sides: job?.sides || 'SINGLE',
+      orientation: job?.orientation || 'PORTRAIT',
+      paperSize: job?.paperSize || 'A4',
+      copies: job?.copies || 1,
+      onProgress: async (phase, detail) => {
+        setBrowserPrintBanner({
+          phase,
+          message: detail || `${phase}: ${order.jobId}`,
+        });
 
-    const isPdf = printUrl.toLowerCase().endsWith('.pdf');
-    const isImage = /\.(jpeg|jpg|png|webp)$/i.test(printUrl);
-
-    if (isImage) {
-      const printWin = window.open('', '_blank', 'width=800,height=900');
-      if (printWin) {
-        printWin.document.write(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Print Bro Auto-Print</title>
-              <style>
-                @page { size: A4 portrait; margin: 0; }
-                @media print {
-                  html, body { margin: 0; padding: 0; width: 210mm; height: 297mm; }
-                  .print-container { width: 210mm; height: 297mm; padding: 10mm; }
-                }
-                html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #fff; }
-                .print-container {
-                  display: flex; align-items: center; justify-content: center;
-                  width: 210mm; height: 297mm; max-width: 100%; max-height: 100%;
-                  margin: 0 auto; box-sizing: border-box; padding: 10mm;
-                }
-                img { max-width: 100% !important; max-height: 100% !important; width: auto !important;
-                  height: auto !important; object-fit: contain !important; display: block !important; margin: auto !important; }
-              </style>
-            </head>
-            <body>
-              <div class="print-container">
-                <img src="${absoluteUrl}" onload="window.focus(); setTimeout(() => { window.print(); }, 300);" />
-              </div>
-            </body>
-          </html>
-        `);
-        printWin.document.close();
-      }
-      return;
-    }
-
-    // PDF / generic file: use hidden iframe approach
-    const existingFrame = document.getElementById('print-bro-auto-frame');
-    if (existingFrame) existingFrame.remove();
-
-    const iframe = document.createElement('iframe');
-    iframe.id = 'print-bro-auto-frame';
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    iframe.src = absoluteUrl;
-
-    document.body.appendChild(iframe);
-
-    iframe.onload = () => {
-      setTimeout(() => {
-        try {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-        } catch (err) {
-          // Cross-origin fallback: open in new tab
-          window.open(absoluteUrl, '_blank');
+        if (phase === 'PRINTING') {
+          try {
+            await fetch('/api/shop-owner/status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ orderId: order.id, shopId, status: 'PRINTING' }),
+            });
+          } catch {}
+        } else if (phase === 'COMPLETED') {
+          try {
+            await fetch('/api/shop-owner/status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ orderId: order.id, shopId, status: 'COMPLETED' }),
+            });
+            fetchDashboard(shopId, true);
+          } catch {}
+          setTimeout(() => {
+            setBrowserPrintBanner((curr) =>
+              curr?.phase === 'COMPLETED' ? null : curr
+            );
+          }, 4000);
+        } else if (phase === 'FAILED') {
+          // Allow manual retry cleanly if browser print failed
+          autoPrintedIdsRef.current.delete(order.id);
         }
-      }, 400);
-    };
+      },
+    });
   };
 
   // Pricing Matrix Form State
@@ -164,15 +156,16 @@ function DashboardContent() {
   const [simPaper, setSimPaper] = useState<'A4' | 'A3' | 'A5' | 'LEGAL'>('A4');
   const [simNUp, setSimNUp] = useState(1);
 
-  const fetchDashboard = async (targetId?: string) => {
+  const fetchDashboard = async (targetId?: string, silent = false) => {
     try {
-      setLoading(true);
-      const idToFetch = targetId || selectedShopId;
+      if (!silent) setLoading(true);
+      const idToFetch = targetId || selectedShopIdRef.current;
       const url = idToFetch ? `/api/shop-owner/orders?shopId=${idToFetch}` : '/api/shop-owner/orders';
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: 'no-store' });
       const json = await res.json();
       setData(json);
-      if (json?.shop?.id && !selectedShopId) {
+      if (json?.shop?.id && !selectedShopIdRef.current) {
+        selectedShopIdRef.current = json.shop.id;
         setSelectedShopId(json.shop.id);
       }
 
@@ -192,52 +185,71 @@ function DashboardContent() {
         });
       }
 
-      // Auto-Print: When shop is in AUTO mode and NOT in emergency stop, trigger silent hardware print!
-      if (!isEmergencyStopped && json?.shop?.printMode === 'AUTO' && Array.isArray(json?.orders)) {
-        for (const order of json.orders) {
-          if (
-            (order.status === 'PAID' || order.status === 'QUEUED') &&
-            !autoPrintedIdsRef.current.has(order.id)
-          ) {
-            autoPrintedIdsRef.current.add(order.id);
-            console.log(`⚡ AUTO-PRINT DISPATCHED silently to printer for order [${order.jobId}]`);
+      // Auto-Print: When shop is in AUTO mode and NOT in emergency stop, trigger automatic print!
+      if (!isEmergencyStoppedRef.current && json?.shop?.printMode === 'AUTO' && Array.isArray(json?.orders)) {
+        // Process oldest queued order first (chronological FIFO)
+        const pendingOrders = [...json.orders]
+          .filter(
+            (order: any) =>
+              (order.status === 'PAID' || order.status === 'QUEUED') &&
+              order.trackingToken !== 'track_seed_token_001' &&
+              !autoPrintedIdsRef.current.has(order.id)
+          )
+          .reverse();
+
+        for (const order of pendingOrders) {
+          autoPrintedIdsRef.current.add(order.id);
+          console.log(`⚡ AUTO-PRINT DISPATCHED for order [${order.jobId}]`);
+          try {
             sounds.playSuccess();
-            // Dispatch silent server-side hardware spooler (zero popups, zero human touches)
-            fetch('/api/shop-owner/print-now', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                orderId: order.id,
-                shopId: json.shop.id,
-                manual: true,
-              }),
-            })
-              .then(async (res) => {
-                if (res.ok) {
-                  const printData = await res.json();
-                  // Fallback: If no Windows Agent is running on this counter system, trigger direct browser kiosk print!
-                  if (!printData.agentOnline && printData.printUrl) {
-                    triggerBrowserPrint(printData.printUrl);
-                  }
-                }
-              })
-              .catch(console.error);
+          } catch {}
+
+          // If native Windows agent is already online for this shop, leave QUEUED for agent.js to claim & spool
+          if (json.agentOnline) {
+            continue;
           }
+
+          fetch('/api/shop-owner/print-now', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              orderId: order.id,
+              shopId: json.shop.id,
+              manual: true,
+            }),
+          })
+            .then(async (res) => {
+              if (res.ok) {
+                const printData = await res.json();
+                if (!printData.agentOnline && !printData.serverSpooled && printData.printUrl) {
+                  dispatchOrderToBrowserPrinter(order, printData.printUrl, json.shop.id);
+                }
+              } else {
+                autoPrintedIdsRef.current.delete(order.id);
+              }
+            })
+            .catch((err) => {
+              console.error('Auto-print dispatch error:', err);
+              autoPrintedIdsRef.current.delete(order.id);
+            });
         }
       }
     } catch (err) {
       console.error(err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   const [currentUser, setCurrentUser] = useState<any>(null);
 
   useEffect(() => {
+    let eventSource: EventSource | null = null;
+    let isMounted = true;
+
     async function verifyAuthAndLoad() {
       try {
-        const res = await fetch('/api/auth/me');
+        const res = await fetch('/api/auth/me', { cache: 'no-store' });
         if (!res.ok) {
           router.push('/login?role=shop');
           return;
@@ -247,14 +259,25 @@ function DashboardContent() {
           router.push('/login?role=shop');
           return;
         }
+        if (!isMounted) return;
         setCurrentUser(json.user);
         const targetShopId = json.user?.shopId || paramShopId;
         if (targetShopId) {
+          selectedShopIdRef.current = targetShopId;
           setSelectedShopId(targetShopId);
           fetchDashboard(targetShopId);
         } else {
           fetchDashboard();
         }
+
+        // Instant SSE Push for real-time sub-second auto-printing after customer payment
+        const sseUrl = targetShopId
+          ? `/api/shop-owner/events?shopId=${encodeURIComponent(targetShopId)}`
+          : '/api/shop-owner/events';
+        eventSource = new EventSource(sseUrl);
+        eventSource.addEventListener('statusUpdate', () => {
+          fetchDashboard(selectedShopIdRef.current || undefined, true);
+        });
       } catch (err) {
         router.push('/login?role=shop');
       }
@@ -262,13 +285,17 @@ function DashboardContent() {
 
     verifyAuthAndLoad();
 
-    // Auto-refresh order queue every 4 seconds
+    // Background polling fallback every 3 seconds
     const interval = setInterval(() => {
-      fetchDashboard();
-    }, 4000);
+      fetchDashboard(selectedShopIdRef.current || undefined, true);
+    }, 3000);
 
-    return () => clearInterval(interval);
-  }, [paramShopId, isEmergencyStopped]);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      if (eventSource) eventSource.close();
+    };
+  }, [paramShopId]);
 
   const handleLogout = async () => {
     sounds.playTap();
@@ -276,129 +303,52 @@ function DashboardContent() {
     router.push('/login?role=shop');
   };
 
-  const printDocumentInBrowser = (doc: any, jobConfig?: any) => {
-    sounds.playPop();
-    const fileUrl = doc.storageUrl;
-    if (!fileUrl) {
-      alert('Error: Document file URL not found.');
-      return;
-    }
-
-    const isBw = jobConfig?.colorMode === 'BW';
-    const isPdf = fileUrl.toLowerCase().endsWith('.pdf') || doc.mimeType === 'application/pdf';
-    const isImage = !isPdf && (fileUrl.match(/\.(jpeg|jpg|png|webp)$/i) || doc.mimeType?.startsWith('image/'));
-
-    if (isImage) {
-      const printWin = window.open('', '_blank', 'width=800,height=900');
-      if (printWin) {
-        printWin.document.write(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Print Bro Auto-Print: ${doc.originalFilename || 'Document'}</title>
-              <style>
-                @page { size: A4 portrait; margin: 0; }
-                @media print {
-                  html, body { margin: 0; padding: 0; width: 210mm; height: 297mm; }
-                  .print-container { width: 210mm; height: 297mm; padding: 10mm; }
-                }
-                html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #fff; }
-                .print-container {
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  width: 210mm;
-                  height: 297mm;
-                  max-width: 100%;
-                  max-height: 100%;
-                  margin: 0 auto;
-                  box-sizing: border-box;
-                  padding: 10mm;
-                }
-                img { 
-                  max-width: 100% !important; 
-                  max-height: 100% !important; 
-                  width: auto !important;
-                  height: auto !important;
-                  object-fit: contain !important; 
-                  display: block !important;
-                  margin: auto !important;
-                  ${isBw ? 'filter: grayscale(100%) contrast(120%) !important; -webkit-filter: grayscale(100%) contrast(120%) !important; -webkit-print-color-adjust: exact !important;' : ''}
-                }
-              </style>
-            </head>
-            <body>
-              <div class="print-container">
-                <img src="${fileUrl}" onload="window.focus(); setTimeout(() => { window.print(); }, 250);" />
-              </div>
-            </body>
-          </html>
-        `);
-        printWin.document.close();
-        return;
-      }
-    }
-
-    // PDF printing: instant direct printing via hidden iframe
-    const existingFrame = document.getElementById('print-bro-direct-frame');
-    if (existingFrame) existingFrame.remove();
-
-    const iframe = document.createElement('iframe');
-    iframe.id = 'print-bro-direct-frame';
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    iframe.src = fileUrl;
-
-    document.body.appendChild(iframe);
-
-    iframe.onload = () => {
-      setTimeout(() => {
-        try {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-        } catch (err) {
-          window.open(fileUrl, '_blank');
-        }
-      }, 350);
-    };
-  };
-
   const handleTestPrint = () => {
     sounds.playTap();
-    const printWin = window.open('', '_blank', 'width=700,height=800');
-    if (printWin) {
-      printWin.document.write(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Print Bro Counter Hardware Test Page</title>
-            <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; text-align: center; }
-              .box { border: 2px dashed #0095ff; padding: 30px; border-radius: 16px; }
-              h1 { color: #0095ff; margin-bottom: 8px; font-weight: 800; }
-              p { color: #475569; font-size: 14px; }
-              .badge { display: inline-block; background: #e0f2fe; color: #0369a1; padding: 4px 12px; border-radius: 9999px; font-weight: bold; font-size: 12px; }
-            </style>
-          </head>
-          <body>
-            <div class="box">
-              <span class="badge">PRINT BRO POS SYSTEM</span>
-              <h1>Shop Counter Hardware Test</h1>
-              <p>Printer verified & ready to accept customer jobs on any model (HP, Canon, Epson, Brother, Ricoh).</p>
-              <p>Time: ${new Date().toLocaleString()}</p>
-            </div>
-            <script>
-              window.onload = function() { window.focus(); window.print(); };
-            </script>
-          </body>
-        </html>
-      `);
-      printWin.document.close();
-    }
+    const existing = document.getElementById('print-bro-test-frame');
+    if (existing) existing.remove();
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'print-bro-test-frame';
+    iframe.style.position = 'fixed';
+    iframe.style.left = '-12000px';
+    iframe.style.top = '0';
+    iframe.style.width = '794px';
+    iframe.style.height = '1123px';
+    iframe.style.border = '0';
+    iframe.style.opacity = '0.01';
+    iframe.srcdoc = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Print Bro Counter Hardware Test Page</title>
+          <style>
+            @page { size: A4 portrait; margin: 12mm; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 30px; text-align: center; }
+            .box { border: 2px dashed #0095ff; padding: 30px; border-radius: 16px; }
+            h1 { color: #0095ff; margin-bottom: 8px; font-weight: 800; }
+            p { color: #475569; font-size: 14px; }
+            .badge { display: inline-block; background: #e0f2fe; color: #0369a1; padding: 4px 12px; border-radius: 9999px; font-weight: bold; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="box">
+            <span class="badge">PRINT BRO POS SYSTEM</span>
+            <h1>Shop Counter Hardware Test</h1>
+            <p>Printer verified & ready to accept automatic customer jobs on any PC and any printer.</p>
+            <p>Time: ${new Date().toLocaleString()}</p>
+          </div>
+        </body>
+      </html>
+    `;
+    iframe.onload = () => {
+      setTimeout(() => {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+        setTimeout(() => iframe.remove(), 2000);
+      }, 150);
+    };
+    document.body.appendChild(iframe);
   };
 
   const handlePrintNow = async (orderOrId: any) => {
@@ -409,7 +359,7 @@ function DashboardContent() {
     try {
       setActionLoading(orderId);
 
-      // Silent Hardware Print Dispatch (zero browser popups)
+      // Dispatch Print Job (routes to native Windows Agent if online, otherwise Browser Auto-Print Engine)
       const res = await fetch('/api/shop-owner/print-now', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -425,14 +375,13 @@ function DashboardContent() {
         return;
       }
       const resData = await res.json();
-      // If no native Windows Print Agent is running on this counter PC, execute instant browser kiosk print
-      if (!resData.agentOnline && resData.printUrl) {
-        triggerBrowserPrint(resData.printUrl);
+      // If no native Windows Print Agent is running, execute reliable sequential browser print
+      if (!resData.agentOnline && !resData.serverSpooled && resData.printUrl) {
+        dispatchOrderToBrowserPrinter(targetOrder || resData.order, resData.printUrl, data.shop.id);
       }
-      await fetchDashboard();
-      // Poll once more after 2 seconds so virtual cloud spool transition reflects cleanly
+      await fetchDashboard(data.shop.id, true);
       setTimeout(() => {
-        fetchDashboard();
+        fetchDashboard(data.shop.id, true);
       }, 2000);
     } catch (e) {
       console.error(e);
@@ -803,6 +752,30 @@ function DashboardContent() {
           </div>
         </div>
 
+        {/* LIVE AUTO-PRINT STATUS BANNER */}
+        {browserPrintBanner && (
+          <div
+            className={`px-4 py-3 rounded-2xl border text-xs font-bold flex items-center justify-between shadow-xs ${
+              browserPrintBanner.phase === 'FAILED'
+                ? 'bg-rose-50 border-rose-200 text-rose-700'
+                : browserPrintBanner.phase === 'COMPLETED'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                : 'bg-blue-50 border-blue-200 text-blue-700'
+            }`}
+          >
+            <div className="flex items-center space-x-2">
+              <Printer className={`w-4 h-4 ${browserPrintBanner.phase === 'PRINTING' || browserPrintBanner.phase === 'PREPARING' ? 'animate-pulse' : ''}`} />
+              <span>{browserPrintBanner.message}</span>
+            </div>
+            <button
+              onClick={() => setBrowserPrintBanner(null)}
+              className="text-[11px] opacity-70 hover:opacity-100"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* ----------------- TAB 1: DASHBOARD OVERVIEW ----------------- */}
         {activeNav === 'overview' && (
           <div className="space-y-6">
@@ -901,37 +874,51 @@ function DashboardContent() {
                       <Globe className="w-4 h-4" />
                     </div>
                     <div>
-                      <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
-                        <span>Option A: 1-Link Web Dashboard</span>
+                      <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5 flex-wrap">
+                        <span>Option A: Any-PC Browser Auto-Print</span>
                         <span className="text-[9px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold uppercase">Zero Install</span>
+                        {data?.agentOnline && (
+                          <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-bold uppercase">Hardware Agent Online</span>
+                        )}
                       </h3>
-                      <p className="text-[11px] text-slate-400">Works on any PC, Chromebook, or tablet with just one link.</p>
+                      <p className="text-[11px] text-slate-400">Open on any PC &amp; printer; use 1-Click Kiosk Launcher for 0-popup printing.</p>
                     </div>
                   </div>
                   <button
                     onClick={handleTestPrint}
-                    className="text-xs font-bold text-blue-600 hover:text-blue-700 underline cursor-pointer"
+                    className="text-xs font-bold text-blue-600 hover:text-blue-700 underline cursor-pointer shrink-0"
                   >
                     Test Page →
                   </button>
                 </div>
 
-                <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between text-xs">
-                  <span className="text-slate-600 text-[11px] font-mono truncate max-w-[280px]">
-                    chrome.exe --kiosk-printing &quot;{typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'}/dashboard&quot;
-                  </span>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={`/api/agent/download?shopId=${shop?.id}&format=kiosk-bat`}
+                    download={`PrintBro_Kiosk_${shop?.slug}.bat`}
+                    onClick={() => sounds.playPop()}
+                    className="flex-1 py-2 rounded-2xl bg-[#0095ff] hover:bg-blue-600 text-white font-bold text-xs text-center shadow-xs hover:shadow-sm transition flex items-center justify-center gap-1.5 active:scale-95"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>1-Click Kiosk (.BAT)</span>
+                  </a>
                   <button
                     onClick={() => {
                       sounds.playPop();
-                      const url = typeof window !== 'undefined' ? `${window.location.origin}/dashboard?shopId=${shop?.id}` : '';
-                      navigator.clipboard.writeText(`chrome.exe --kiosk-printing "${url}"`);
+                      const url =
+                        typeof window !== 'undefined' && shop?.id && shop?.apiKey
+                          ? `${window.location.origin}/api/auth/kiosk?shopId=${shop.id}&key=${shop.apiKey}`
+                          : typeof window !== 'undefined'
+                          ? `${window.location.origin}/dashboard?shopId=${shop?.id}`
+                          : '';
+                      navigator.clipboard.writeText(url);
                       setCopiedKiosk(true);
                       setTimeout(() => setCopiedKiosk(false), 2500);
                     }}
-                    className="px-3 py-1 rounded-xl bg-white border border-slate-200 hover:border-slate-300 text-blue-600 font-bold text-xs shadow-2xs flex items-center gap-1 cursor-pointer transition active:scale-95"
+                    className="flex-1 py-2 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-blue-700 font-bold text-xs shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95"
                   >
                     {copiedKiosk ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedKiosk ? 'Copied!' : 'Copy Kiosk'}</span>
+                    <span>{copiedKiosk ? 'Copied Link!' : 'Copy Counter Link'}</span>
                   </button>
                 </div>
               </div>

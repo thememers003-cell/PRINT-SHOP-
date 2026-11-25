@@ -53,4 +53,18 @@ describe('Agent Download API', () => {
     const res = await GET(req);
     expect(res.status).toBe(400);
   });
+
+  it('generates a zero-install 1-click Chrome kiosk launcher for format=kiosk-bat', async () => {
+    const req = new Request(`http://localhost:3000/api/agent/download?shopId=${testShopId}&format=kiosk-bat`);
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/x-bat');
+    expect(res.headers.get('Content-Disposition')).toContain('PrintBro_Kiosk_test-download-shop.bat');
+
+    const body = await res.text();
+    expect(body).toContain('--kiosk-printing');
+    expect(body).toContain('--user-data-dir=');
+    expect(body).toContain(`/api/auth/kiosk?shopId=${testShopId}&key=pb_live_test_download_key_123`);
+  });
 });

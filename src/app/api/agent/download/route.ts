@@ -21,10 +21,71 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Shop not found' }, { status: 404 });
     }
 
-    // Determine host URL (Vercel or localhost)
-    const host = request.headers.get('host') || 'localhost:3000';
-    const protocol = host.includes('localhost') ? 'http' : 'https';
-    const serverUrl = `${protocol}://${host}`;
+    // Determine host URL (Render/proxy, Vercel, or localhost)
+    const host =
+      request.headers.get('x-forwarded-host') ||
+      request.headers.get('host') ||
+      'localhost:3000';
+    const proto =
+      request.headers.get('x-forwarded-proto') ||
+      (host.includes('localhost') || host.includes('127.0.0.1') ? 'http' : 'https');
+    const serverUrl = `${proto}://${host}`;
+
+    if (format === 'kiosk-bat') {
+      const kioskUrl = `${serverUrl}/api/auth/kiosk?shopId=${encodeURIComponent(shop.id)}&key=${encodeURIComponent(shop.apiKey || '')}`;
+      const kioskBat = `@echo off
+title Print Bro - ${shop.name} 1-Click Kiosk Auto-Print
+color 0a
+echo ==============================================================
+echo    PRINT BRO - ZERO-INSTALL AUTO-PRINT KIOSK BROWSER
+echo ==============================================================
+echo Shop   : ${shop.name}
+echo Target : ${serverUrl}
+echo Mode   : Automatic 0-Click Printing on Default OS Printer
+echo.
+echo Launching dedicated silent-print browser window...
+echo (Keep this window open; every customer upload will print automatically!)
+echo.
+
+set "KIOSK_URL=${kioskUrl}"
+set "PROFILE_DIR=%TEMP%\\PrintBroKiosk_${shop.slug}"
+
+if exist "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" (
+    start "" "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
+    goto :launched
+)
+if exist "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" (
+    start "" "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
+    goto :launched
+)
+if exist "%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe" (
+    start "" "%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
+    goto :launched
+)
+if exist "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" (
+    start "" "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
+    goto :launched
+)
+if exist "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" (
+    start "" "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
+    goto :launched
+)
+
+echo Chrome/Edge not found in default paths; opening standard browser...
+start "" "%KIOSK_URL%"
+
+:launched
+echo Print Bro Auto-Print Station launched!
+`;
+
+      return new Response(kioskBat, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/x-bat',
+          'Content-Disposition': `attachment; filename="PrintBro_Kiosk_${shop.slug}.bat"`,
+        },
+      });
+    }
 
     if (format === 'exe') {
       const exePath = path.join(process.cwd(), 'PrintBro-Agent.exe');

@@ -72,6 +72,7 @@ export async function getShopDashboardData(shopId: string) {
   return {
     shop,
     orders,
+    agentOnline: isShopAgentOnline(shopId),
     metrics: {
       todayOrdersCount,
       todayEarnings: Number(todayEarnings.toFixed(2)),
@@ -126,6 +127,7 @@ export async function dispatchManualPrintLogic(
   // Emit SSE event
   orderEvents.emit('statusUpdate', {
     jobId: order.jobId,
+    shopId,
     status: 'QUEUED',
     paymentStatus: order.paymentStatus,
     timestamp: new Date().toISOString(),
@@ -137,10 +139,12 @@ export async function dispatchManualPrintLogic(
     updated.documents?.[0]?.storageUrl ||
     `/spooler-output/order_${updated.jobId}.pdf`;
 
-  // Run server-side spooler on local Windows host.
+  const serverWillSpool = process.platform === 'win32' && !agentOnline;
+
+  // Run server-side spooler on local Windows host when no remote agent is connected.
   // When remote Windows Print Agent is online, keep QUEUED so agent.js downloads and prints on physical hardware.
-  // On cloud (Linux), if no agent is connected, still keep QUEUED — the dashboard browser kiosk fallback will print.
-  if (process.platform === 'win32' && !agentOnline) {
+  // On cloud (Linux), if no agent is connected, keep QUEUED — the dashboard browser kiosk fallback will print.
+  if (serverWillSpool) {
     import('./spooler-service').then(({ spoolOrderDirectly }) => {
       spoolOrderDirectly(orderId).catch((err) => {
         console.warn('Silent hardware spooling notice:', err.message);
@@ -151,6 +155,7 @@ export async function dispatchManualPrintLogic(
   return {
     order: updated,
     agentOnline,
+    serverSpooled: serverWillSpool,
     printUrl,
   };
 }
@@ -181,6 +186,7 @@ export async function updateOrderStatusLogic(orderId: string, shopId: string, st
 
   orderEvents.emit('statusUpdate', {
     jobId: order.jobId,
+    shopId,
     status,
     paymentStatus: order.paymentStatus,
     timestamp: new Date().toISOString(),

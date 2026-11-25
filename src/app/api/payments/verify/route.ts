@@ -80,6 +80,7 @@ export async function POST(request: Request) {
     // Broadcast SSE live update to tracking page & shop owner POS
     orderEvents.emit('statusUpdate', {
       jobId: order.jobId,
+      shopId: order.shopId,
       status: nextStatus,
       paymentStatus: 'SUCCESS',
       timestamp: new Date().toISOString(),
