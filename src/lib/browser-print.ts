@@ -382,8 +382,9 @@ async function executeBrowserPrintJob(job: BrowserPrintJob): Promise<void> {
   const isGrayscale = job.colorMode === 'BW';
   const paperCss = PAPER_CSS_MAP[(job.paperSize || 'A4').toUpperCase()] || 'A4';
   const copies = job.copies && job.copies > 0 ? job.copies : 1;
+  const specLabel = `${isGrayscale ? 'B&W' : 'Colour'} • ${job.sides === 'DUPLEX' ? 'DUPLEX (2-Sided)' : 'Single-Sided'} • ${(job.paperSize || 'A4').toUpperCase()} • ${copies}x`;
 
-  job.onProgress?.('PREPARING', `Preparing ${job.jobId}...`);
+  job.onProgress?.('PREPARING', `Preparing ${job.jobId} (${specLabel})...`);
 
   const { buffer, contentType, url } = await fetchDocumentBytes(
     job.printUrl,
@@ -399,7 +400,7 @@ async function executeBrowserPrintJob(job: BrowserPrintJob): Promise<void> {
     !looksLikePdf &&
     (contentType.toLowerCase().startsWith('image/') || /\.(png|jpg|jpeg|webp)$/i.test(url));
 
-  job.onProgress?.('PRINTING', `Sending ${job.jobId} to printer...`);
+  job.onProgress?.('PRINTING', `Printing ${job.jobId} (${specLabel})...`);
 
   if (looksLikePdf) {
     try {

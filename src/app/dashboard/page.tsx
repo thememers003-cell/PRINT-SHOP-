@@ -61,13 +61,25 @@ function DashboardContent() {
   const [copiedKiosk, setCopiedKiosk] = useState(false);
   const [copiedApiKey, setCopiedApiKey] = useState(false);
   const [isEmergencyStopped, setIsEmergencyStopped] = useState(false);
+  const [holdDuplexInBrowser, setHoldDuplexInBrowser] = useState(false);
   const [browserPrintBanner, setBrowserPrintBanner] = useState<{
     phase: 'PREPARING' | 'PRINTING' | 'COMPLETED' | 'FAILED';
     message: string;
+    isDuplex?: boolean;
   } | null>(null);
   const autoPrintedIdsRef = useRef<Set<string>>(new Set());
   const selectedShopIdRef = useRef<string | null>(paramShopId || null);
   const isEmergencyStoppedRef = useRef<boolean>(false);
+  const holdDuplexRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('printbro_hold_duplex') === 'true') {
+        setHoldDuplexInBrowser(true);
+        holdDuplexRef.current = true;
+      }
+    } catch {}
+  }, []);
 
   useEffect(() => {
     selectedShopIdRef.current = selectedShopId;
@@ -77,6 +89,13 @@ function DashboardContent() {
     isEmergencyStoppedRef.current = isEmergencyStopped;
   }, [isEmergencyStopped]);
 
+  useEffect(() => {
+    holdDuplexRef.current = holdDuplexInBrowser;
+    try {
+      localStorage.setItem('printbro_hold_duplex', String(holdDuplexInBrowser));
+    } catch {}
+  }, [holdDuplexInBrowser]);
+
   /**
    * Browser Kiosk Auto-Print Dispatcher:
    * Enqueues the exact print-ready document (with copies, B&W grayscale, orientation & paper size)
@@ -85,6 +104,7 @@ function DashboardContent() {
   const dispatchOrderToBrowserPrinter = (order: any, printUrl: string, shopId: string) => {
     if (!printUrl || !order) return;
     const job = order.jobs?.[0];
+    const isDuplexJob = job?.sides === 'DUPLEX';
 
     enqueueBrowserPrint({
       orderId: order.id,
@@ -100,6 +120,7 @@ function DashboardContent() {
         setBrowserPrintBanner({
           phase,
           message: detail || `${phase}: ${order.jobId}`,
+          isDuplex: isDuplexJob,
         });
 
         if (phase === 'PRINTING') {
@@ -198,16 +219,23 @@ function DashboardContent() {
           .reverse();
 
         for (const order of pendingOrders) {
+          // If native Windows agent is already online for this shop, leave QUEUED for agent.js to claim & spool
+          if (json.agentOnline) {
+            autoPrintedIdsRef.current.add(order.id);
+            continue;
+          }
+
+          // Optional Duplex Guard in Browser Mode: hold DUPLEX orders in queue for manual Two-Sided toggle
+          const isDuplexOrder = order.jobs?.[0]?.sides === 'DUPLEX';
+          if (holdDuplexRef.current && isDuplexOrder) {
+            continue;
+          }
+
           autoPrintedIdsRef.current.add(order.id);
           console.log(`⚡ AUTO-PRINT DISPATCHED for order [${order.jobId}]`);
           try {
             sounds.playSuccess();
           } catch {}
-
-          // If native Windows agent is already online for this shop, leave QUEUED for agent.js to claim & spool
-          if (json.agentOnline) {
-            continue;
-          }
 
           fetch('/api/shop-owner/print-now', {
             method: 'POST',
@@ -755,17 +783,24 @@ function DashboardContent() {
         {/* LIVE AUTO-PRINT STATUS BANNER */}
         {browserPrintBanner && (
           <div
-            className={`px-4 py-3 rounded-2xl border text-xs font-bold flex items-center justify-between shadow-xs ${
+            className={`px-4 py-3 rounded-2xl border text-xs font-bold flex flex-wrap items-center justify-between gap-2 shadow-xs ${
               browserPrintBanner.phase === 'FAILED'
                 ? 'bg-rose-50 border-rose-200 text-rose-700'
                 : browserPrintBanner.phase === 'COMPLETED'
                 ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                : browserPrintBanner.isDuplex
+                ? 'bg-amber-50 border-amber-300 text-amber-900'
                 : 'bg-blue-50 border-blue-200 text-blue-700'
             }`}
           >
             <div className="flex items-center space-x-2">
               <Printer className={`w-4 h-4 ${browserPrintBanner.phase === 'PRINTING' || browserPrintBanner.phase === 'PREPARING' ? 'animate-pulse' : ''}`} />
               <span>{browserPrintBanner.message}</span>
+              {browserPrintBanner.isDuplex && browserPrintBanner.phase !== 'COMPLETED' && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-950 text-[10px] font-black uppercase">
+                  Double-Sided Requested
+                </span>
+              )}
             </div>
             <button
               onClick={() => setBrowserPrintBanner(null)}
@@ -921,6 +956,18 @@ function DashboardContent() {
                     <span>{copiedKiosk ? 'Copied Link!' : 'Copy Counter Link'}</span>
                   </button>
                 </div>
+
+                <label className="flex items-center justify-between px-3 py-2 rounded-2xl bg-slate-50 border border-slate-200/80 text-[11px] cursor-pointer">
+                  <span className="font-semibold text-slate-600">
+                    Hold <strong className="text-slate-800">Duplex (2-Sided)</strong> jobs in queue for manual confirmation (Browser Mode)
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={holdDuplexInBrowser}
+                    onChange={(e) => setHoldDuplexInBrowser(e.target.checked)}
+                    className="w-4 h-4 rounded accent-blue-600 cursor-pointer"
+                  />
+                </label>
               </div>
 
               {/* Option B: 1-Click Desktop Spooler */}
