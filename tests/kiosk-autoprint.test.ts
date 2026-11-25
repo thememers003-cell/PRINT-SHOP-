@@ -58,6 +58,16 @@ describe('Zero-Install Kiosk Auto-Login & Auto-Print Pipeline', () => {
     expect(session?.shopId).toBe(shopId);
   });
 
+  it('survives stale shopId via stable slug fallback after cold restart', async () => {
+    const shop = await prisma.shop.findUnique({ where: { id: shopId } });
+    const req = new Request(
+      `http://localhost:3000/api/auth/kiosk?shopId=stale_old_id_123&slug=${shop!.slug}&key=${apiKey}`
+    );
+    const res = await kioskAuthGET(req);
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toContain(`/dashboard?shopId=${shopId}&kiosk=1`);
+  });
+
   it('exposes accurate agentOnline status in dashboard data', async () => {
     const before = await getShopDashboardData(shopId);
     expect(before.agentOnline).toBe(false);

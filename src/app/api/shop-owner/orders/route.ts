@@ -12,7 +12,13 @@ export async function GET(request: Request) {
     // Strict Multi-Tenant Enforcement:
     // If authenticated as a SHOP_OWNER, strictly enforce their own shopId!
     if (session?.role === 'SHOP_OWNER' && session.shopId) {
-      shopId = session.shopId;
+      const ownedById = await prisma.shop.findUnique({ where: { id: session.shopId }, select: { id: true } });
+      if (ownedById) {
+        shopId = ownedById.id;
+      } else if (session.shopSlug) {
+        const ownedBySlug = await prisma.shop.findUnique({ where: { slug: session.shopSlug }, select: { id: true } });
+        shopId = ownedBySlug?.id || null;
+      }
     }
 
     // If shopId not provided in query and no shop owner session, default to Sri Ganesh Xerox

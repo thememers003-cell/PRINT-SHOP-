@@ -16,6 +16,7 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const shopId = (searchParams.get('shopId') || '').trim();
+    const slug = (searchParams.get('slug') || '').trim();
     const apiKey = (searchParams.get('key') || '').trim();
 
     const host = request.headers.get('x-forwarded-host') || request.headers.get('host');
@@ -23,17 +24,35 @@ export async function GET(request: Request) {
       request.headers.get('x-forwarded-proto') ||
       (host && (host.includes('localhost') || host.includes('127.0.0.1')) ? 'http' : 'https');
 
-    if (!shopId || !apiKey) {
+    if ((!shopId && !slug && !apiKey) || !apiKey) {
       const loginUrl = host
         ? `${proto}://${host}/login?role=shop`
         : new URL('/login?role=shop', request.url);
       return NextResponse.redirect(loginUrl);
     }
 
-    const shop = await prisma.shop.findUnique({
-      where: { id: shopId },
-      include: { users: true },
-    });
+    // Look up by shopId first, then fall back to stable slug or apiKey
+    // (survives Render cold restarts / SQLite re-seeds where CUID shopIds regenerate)
+    let shop = shopId
+      ? await prisma.shop.findUnique({
+          where: { id: shopId },
+          include: { users: true },
+        })
+      : null;
+
+    if (!shop && slug) {
+      shop = await prisma.shop.findUnique({
+        where: { slug },
+        include: { users: true },
+      });
+    }
+
+    if (!shop && apiKey) {
+      shop = await prisma.shop.findUnique({
+        where: { apiKey },
+        include: { users: true },
+      });
+    }
 
     if (!shop || !shop.apiKey) {
       return NextResponse.json({ error: 'Invalid shop kiosk link.' }, { status: 401 });

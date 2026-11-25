@@ -81,7 +81,7 @@ export async function GET(request: Request) {
 
     const safeShopTitle = sanitizeBatchText(shop.name);
     const safeSlug = String(shop.slug || 'shop').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const kioskUrl = `${serverUrl}/api/auth/kiosk?shopId=${encodeURIComponent(shop.id)}&key=${encodeURIComponent(shop.apiKey || '')}`;
+    const kioskUrl = `${serverUrl}/api/auth/kiosk?shopId=${encodeURIComponent(shop.id)}&slug=${encodeURIComponent(shop.slug)}&key=${encodeURIComponent(shop.apiKey || '')}`;
 
     if (format === 'kiosk-bat') {
       const kioskBat = toCrlf(`@echo off

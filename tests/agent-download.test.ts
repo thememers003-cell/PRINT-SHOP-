@@ -65,7 +65,7 @@ describe('Agent Download API', () => {
     const body = await res.text();
     expect(body).toContain('--kiosk-printing');
     expect(body).toContain('--user-data-dir=');
-    expect(body).toContain(`/api/auth/kiosk?shopId=${testShopId}&key=pb_live_test_download_key_123`);
+    expect(body).toContain(`/api/auth/kiosk?shopId=${testShopId}&slug=test-download-shop&key=pb_live_test_download_key_123`);
     expect(body).toContain('\r\n');
     expect(body).not.toMatch(/echo\s+Shop.*&/);
     expect(body).not.toMatch(/title\s+Print Bro.*&/);

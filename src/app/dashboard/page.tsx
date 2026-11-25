@@ -907,7 +907,7 @@ function DashboardContent() {
                       sounds.playPop();
                       const url =
                         typeof window !== 'undefined' && shop?.id && shop?.apiKey
-                          ? `${window.location.origin}/api/auth/kiosk?shopId=${shop.id}&key=${shop.apiKey}`
+                          ? `${window.location.origin}/api/auth/kiosk?shopId=${shop.id}&slug=${shop.slug}&key=${shop.apiKey}`
                           : typeof window !== 'undefined'
                           ? `${window.location.origin}/dashboard?shopId=${shop?.id}`
                           : '';
