@@ -31,16 +31,33 @@ function isHardwarePrinter(name) {
   return true;
 }
 
+let cachedPrinters = null;
+let cachedPrintersAt = 0;
+const PRINTER_CACHE_TTL_MS = 60000;
+
 /**
  * Auto-detects real physical hardware printers on this Windows PC.
  */
-async function discoverWindowsPrinters() {
+async function discoverWindowsPrinters(forceRefresh = false) {
+  if (!forceRefresh && cachedPrinters && Date.now() - cachedPrintersAt < PRINTER_CACHE_TTL_MS) {
+    return cachedPrinters;
+  }
+
   let hardwarePrinters = [];
+  let defaultPrn = null;
+
   try {
-    const rawList = await ptp.getPrinters();
-    hardwarePrinters = rawList.filter((p) => isHardwarePrinter(p.name));
+    const [rawList, defPrn] = await Promise.all([
+      ptp.getPrinters().catch((error) => {
+        console.warn('⚠️ ptp.getPrinters error, checking detected hardware profile:', error.message);
+        return [];
+      }),
+      ptp.getDefaultPrinter().catch(() => null),
+    ]);
+    hardwarePrinters = (rawList || []).filter((p) => isHardwarePrinter(p.name));
+    defaultPrn = defPrn;
   } catch (error) {
-    console.warn('⚠️ ptp.getPrinters error, checking detected hardware profile:', error.message);
+    console.warn('⚠️ Printer discovery notice:', error.message);
   }
 
   // Ensure EPSON L3250 Series is included if no other hardware is found
@@ -54,17 +71,11 @@ async function discoverWindowsPrinters() {
     ];
   }
 
-  // Auto-detect system default printer (HP, Canon, Epson, Brother, Ricoh, etc.)
-  let defaultPrn = null;
-  try {
-    defaultPrn = await ptp.getDefaultPrinter();
-  } catch (e) {}
-
   const defaultIndex = defaultPrn
     ? hardwarePrinters.findIndex((p) => p.name.toLowerCase() === defaultPrn.name.toLowerCase())
     : 0;
 
-  return hardwarePrinters.map((p, idx) => ({
+  cachedPrinters = hardwarePrinters.map((p, idx) => ({
     name: p.name,
     systemDriver: p.deviceId || p.name,
     portName: 'USB001',
@@ -74,6 +85,8 @@ async function discoverWindowsPrinters() {
     paperSizes: Array.isArray(p.paperSizes) ? p.paperSizes.join(',') : 'A4,Letter',
     isDefault: idx === (defaultIndex !== -1 ? defaultIndex : 0),
   }));
+  cachedPrintersAt = Date.now();
+  return cachedPrinters;
 }
 
 /**

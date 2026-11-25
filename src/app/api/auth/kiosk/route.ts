@@ -18,8 +18,16 @@ export async function GET(request: Request) {
     const shopId = (searchParams.get('shopId') || '').trim();
     const apiKey = (searchParams.get('key') || '').trim();
 
+    const host = request.headers.get('x-forwarded-host') || request.headers.get('host');
+    const proto =
+      request.headers.get('x-forwarded-proto') ||
+      (host && (host.includes('localhost') || host.includes('127.0.0.1')) ? 'http' : 'https');
+
     if (!shopId || !apiKey) {
-      return NextResponse.redirect(new URL('/login?role=shop', request.url));
+      const loginUrl = host
+        ? `${proto}://${host}/login?role=shop`
+        : new URL('/login?role=shop', request.url);
+      return NextResponse.redirect(loginUrl);
     }
 
     const shop = await prisma.shop.findUnique({
@@ -53,11 +61,6 @@ export async function GET(request: Request) {
       shopName: shop.name,
       loginTime: Date.now(),
     });
-
-    const host = request.headers.get('x-forwarded-host') || request.headers.get('host');
-    const proto =
-      request.headers.get('x-forwarded-proto') ||
-      (host && (host.includes('localhost') || host.includes('127.0.0.1')) ? 'http' : 'https');
 
     const redirectTarget = host
       ? `${proto}://${host}/dashboard?shopId=${encodeURIComponent(shop.id)}&kiosk=1`

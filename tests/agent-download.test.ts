@@ -66,5 +66,28 @@ describe('Agent Download API', () => {
     expect(body).toContain('--kiosk-printing');
     expect(body).toContain('--user-data-dir=');
     expect(body).toContain(`/api/auth/kiosk?shopId=${testShopId}&key=pb_live_test_download_key_123`);
+    expect(body).toContain('\r\n');
+    expect(body).not.toMatch(/echo\s+Shop.*&/);
+    expect(body).not.toMatch(/title\s+Print Bro.*&/);
+  });
+
+  it('sanitizes & in shop name so cmd.exe never splits title or echo commands', async () => {
+    const shop = await prisma.shop.update({
+      where: { id: testShopId },
+      data: { name: 'Sri Ganesh Xerox & Stationers' },
+    });
+
+    try {
+      const res = await GET(new Request(`http://localhost:3000/api/agent/download?shopId=${shop.id}&format=bat`));
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain('Sri Ganesh Xerox and Stationers');
+      expect(body).not.toMatch(/^(title|echo)\b.*&/m);
+    } finally {
+      await prisma.shop.update({
+        where: { id: testShopId },
+        data: { name: 'Test Download Shop' },
+      });
+    }
   });
 });

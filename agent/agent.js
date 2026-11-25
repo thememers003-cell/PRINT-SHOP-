@@ -38,6 +38,15 @@ console.log(`Shop API Key  : ${apiKey.substring(0, 8)}...`);
 console.log(`Platform OS   : ${process.platform} (${process.arch})`);
 console.log('------------------------------------------------------');
 
+function formatError(err) {
+  if (!err) return 'Unknown error';
+  if (err.message) return err.message;
+  if (Array.isArray(err.errors) && err.errors.length > 0) {
+    return err.errors.map((e) => e.message || e.code).filter(Boolean).join('; ');
+  }
+  return err.code || String(err);
+}
+
 // Helper for HTTP requests
 function apiRequest(method, endpoint, body = null) {
   return new Promise((resolve, reject) => {
@@ -91,7 +100,7 @@ async function registerPrinters() {
     const res = await apiRequest('POST', '/api/agent/printers', { printers });
     console.log(`✅ Successfully synced ${res.registeredCount} printer(s) to shop dashboard.`);
   } catch (err) {
-    console.error('❌ Printer discovery/sync failed:', err.message);
+    console.error('❌ Printer discovery/sync failed:', formatError(err));
   }
 }
 
@@ -259,9 +268,15 @@ async function fetchAndPrepareDocument(job, doc, cfg, serverTarget) {
   return rawBuffer;
 }
 
+let pollOfflineNotified = false;
+
 async function pollAndProcessJobs() {
   try {
     const res = await apiRequest('GET', '/api/agent/jobs');
+    if (pollOfflineNotified) {
+      console.log(`✅ Reconnected to Print Bro server (${serverUrl}).`);
+      pollOfflineNotified = false;
+    }
     if (!res.job) {
       return; // No jobs queued
     }
@@ -325,19 +340,23 @@ async function pollAndProcessJobs() {
       status: 'COMPLETED',
     });
   } catch (err) {
-    // Polling retry
+    if (!pollOfflineNotified) {
+      console.warn(`⚠️ Waiting for server connection (${serverUrl}): ${formatError(err)}`);
+      pollOfflineNotified = true;
+    }
   }
 }
 
 async function startAgent() {
-  // 1. Initial printer discovery & registration
-  await registerPrinters();
+  // 1. Initial printer discovery & registration (non-blocking so job polling starts immediately)
+  registerPrinters();
 
   // 2. Heartbeat timer (every 30 seconds)
   setInterval(sendHeartbeat, 30000);
 
   // 3. Job polling loop (every 3 seconds)
   console.log('⚡ Print Agent daemon active. Listening for cloud print jobs...');
+  pollAndProcessJobs();
   setInterval(pollAndProcessJobs, 3000);
 }
 

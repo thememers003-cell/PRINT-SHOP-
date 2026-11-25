@@ -3,6 +3,54 @@ import { prisma } from '@/lib/prisma';
 import fs from 'fs';
 import path from 'path';
 
+/**
+ * Sanitizes strings interpolated into unquoted cmd.exe `echo` / `title` lines
+ * so characters like `&` (e.g. "Sri Ganesh Xerox & Stationers") do not split shell commands.
+ */
+function sanitizeBatchText(value: string): string {
+  return String(value || '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[&|<>^%()!"]/g, (ch) => (ch === '&' ? 'and' : ' '))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function toCrlf(script: string): string {
+  return script.replace(/\r?\n/g, '\r\n');
+}
+
+function buildKioskLaunchLines(kioskUrlVar: string, profileDirVar: string): string {
+  return `set "KIOSK_URL=${kioskUrlVar}"
+set "PROFILE_DIR=${profileDirVar}"
+
+if exist "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" (
+    start "" "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
+    goto :kiosk_launched
+)
+if exist "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" (
+    start "" "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
+    goto :kiosk_launched
+)
+if exist "%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe" (
+    start "" "%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
+    goto :kiosk_launched
+)
+if exist "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" (
+    start "" "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
+    goto :kiosk_launched
+)
+if exist "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" (
+    start "" "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
+    goto :kiosk_launched
+)
+
+echo Chrome/Edge not found in default paths; opening standard browser...
+start "" "%KIOSK_URL%"
+
+:kiosk_launched
+echo Print Bro Auto-Print Station launched!`;
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -31,52 +79,28 @@ export async function GET(request: Request) {
       (host.includes('localhost') || host.includes('127.0.0.1') ? 'http' : 'https');
     const serverUrl = `${proto}://${host}`;
 
+    const safeShopTitle = sanitizeBatchText(shop.name);
+    const safeSlug = String(shop.slug || 'shop').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const kioskUrl = `${serverUrl}/api/auth/kiosk?shopId=${encodeURIComponent(shop.id)}&key=${encodeURIComponent(shop.apiKey || '')}`;
+
     if (format === 'kiosk-bat') {
-      const kioskUrl = `${serverUrl}/api/auth/kiosk?shopId=${encodeURIComponent(shop.id)}&key=${encodeURIComponent(shop.apiKey || '')}`;
-      const kioskBat = `@echo off
-title Print Bro - ${shop.name} 1-Click Kiosk Auto-Print
+      const kioskBat = toCrlf(`@echo off
+title Print Bro - ${safeShopTitle} 1-Click Kiosk Auto-Print
 color 0a
 echo ==============================================================
 echo    PRINT BRO - ZERO-INSTALL AUTO-PRINT KIOSK BROWSER
 echo ==============================================================
-echo Shop   : ${shop.name}
+echo Shop   : ${safeShopTitle}
 echo Target : ${serverUrl}
 echo Mode   : Automatic 0-Click Printing on Default OS Printer
 echo.
+echo Tip: Ensure your physical printer is set as Windows Default Printer.
 echo Launching dedicated silent-print browser window...
-echo (Keep this window open; every customer upload will print automatically!)
 echo.
 
-set "KIOSK_URL=${kioskUrl}"
-set "PROFILE_DIR=%TEMP%\\PrintBroKiosk_${shop.slug}"
-
-if exist "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" (
-    start "" "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
-    goto :launched
-)
-if exist "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" (
-    start "" "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
-    goto :launched
-)
-if exist "%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe" (
-    start "" "%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
-    goto :launched
-)
-if exist "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" (
-    start "" "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
-    goto :launched
-)
-if exist "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" (
-    start "" "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" --kiosk-printing --user-data-dir="%PROFILE_DIR%" --no-first-run --disable-popup-blocking --app="%KIOSK_URL%"
-    goto :launched
-)
-
-echo Chrome/Edge not found in default paths; opening standard browser...
-start "" "%KIOSK_URL%"
-
-:launched
-echo Print Bro Auto-Print Station launched!
-`;
+${buildKioskLaunchLines(kioskUrl, `%TEMP%\\PrintBroKiosk_${safeSlug}`)}
+timeout /t 2 >nul
+`);
 
       return new Response(kioskBat, {
         status: 200,
@@ -101,28 +125,46 @@ echo Print Bro Auto-Print Station launched!
       }
     }
 
-    // Default to .bat launcher preconfigured with shop credentials
-    const batContent = `@echo off
-title Print Bro - ${shop.name} Zero-Touch Print Agent
+    // Option B .bat launcher: runs native Windows Spooler Agent if repo+Node exist locally,
+    // otherwise automatically falls back to Chrome/Edge Kiosk Auto-Print so it works from ANY folder on ANY PC.
+    const batContent = toCrlf(`@echo off
+title Print Bro - ${safeShopTitle} Auto-Print Launcher
 color 0b
 echo ==============================================================
 echo    PRINT BRO - ZERO-TOUCH HARDWARE PRINT SPOOLER
 echo ==============================================================
-echo Shop       : ${shop.name}
+echo Shop       : ${safeShopTitle}
 echo Server     : ${serverUrl}
-echo Mode       : 100% Hands-Free Auto Hardware Spooling
-echo.
-echo Auto-detecting local hardware printers (Epson, HP, Canon, Brother, Ricoh)...
 echo.
 
-node agent/agent.js --key ${shop.apiKey} --server ${serverUrl}
+set "AGENT_DIR="
+if exist "%~dp0agent\\agent.js" set "AGENT_DIR=%~dp0"
+if not defined AGENT_DIR if exist "%~dp0..\\agent\\agent.js" set "AGENT_DIR=%~dp0.."
+if not defined AGENT_DIR if exist "%USERPROFILE%\\Desktop\\XEROX\\agent\\agent.js" set "AGENT_DIR=%USERPROFILE%\\Desktop\\XEROX"
 
-if %ERRORLEVEL% NEQ 0 (
+where node >nul 2>&1
+if %ERRORLEVEL% NEQ 0 set "AGENT_DIR="
+
+if defined AGENT_DIR (
+  echo Found local Windows Print Agent in: "%AGENT_DIR%"
+  echo Auto-detecting local hardware printers ^(Epson, HP, Canon, Brother^)...
   echo.
-  echo [Notice] Make sure Node.js is installed on this PC.
-  pause
+  cd /d "%AGENT_DIR%"
+  node agent/agent.js --key ${shop.apiKey} --server ${serverUrl}
+  if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo [ERROR] Print Agent exited unexpectedly.
+    pause
+  )
+  goto :eof
 )
-`;
+
+echo [Notice] Standalone repo/Node.js not found on this PC.
+echo Switching automatically to Zero-Install Browser Auto-Print Kiosk Mode...
+echo.
+${buildKioskLaunchLines(kioskUrl, `%TEMP%\\PrintBroKiosk_${safeSlug}`)}
+timeout /t 3 >nul
+`);
 
     return new Response(batContent, {
       status: 200,
