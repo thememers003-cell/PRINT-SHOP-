@@ -11,7 +11,8 @@ import {
   MapPin, 
   PlusCircle,
   FileText,
-  UploadCloud
+  UploadCloud,
+  Phone
 } from 'lucide-react';
 import { PrintBroLogo } from '@/components/brand/PrintBroLogo';
 
@@ -123,6 +124,53 @@ export default async function HomePage() {
                 <span>Zero-Queue Kiosk Verification</span>
               </span>
             </div>
+          </div>
+        </div>
+
+        {/* Standard Pricing & Pro Installation Support */}
+        <div className="mt-10 w-full max-w-4xl grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
+          <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-xs flex items-center justify-between">
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Standard Print
+              </span>
+              <h3 className="text-base font-bold text-slate-900 mt-0.5">Black &amp; White</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Crisp monochrome A4 laser print</p>
+            </div>
+            <div className="text-right">
+              <span className="text-2xl font-black text-slate-900">₹2</span>
+              <span className="block text-[11px] font-semibold text-slate-400">per page</span>
+            </div>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-white border border-blue-200 shadow-xs flex items-center justify-between">
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">
+                Full Colour
+              </span>
+              <h3 className="text-base font-bold text-slate-900 mt-0.5">Colour Print</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Vibrant HD colour document &amp; photo</p>
+            </div>
+            <div className="text-right">
+              <span className="text-2xl font-black text-blue-600">₹10</span>
+              <span className="block text-[11px] font-semibold text-slate-400">per page</span>
+            </div>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 text-white shadow-sm flex flex-col justify-between">
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                Installation &amp; Serve PRO
+              </span>
+              <h3 className="text-sm font-bold text-white mt-1">G Manish Kumar</h3>
+            </div>
+            <a
+              href="tel:9989876985"
+              className="mt-3 inline-flex items-center justify-center space-x-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs transition"
+            >
+              <Phone className="w-3.5 h-3.5" />
+              <span>Call: 9989876985</span>
+            </a>
           </div>
         </div>
 
